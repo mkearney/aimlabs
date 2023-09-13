@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "aimlabs"
+version = "0.1.0"
+description = ""
+authors = ["kearneymw <mike.wayne.kearney@gmail.com>"]
+readme = "README.md"
+packages = [{include = "aimlabs", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pydantic = "^2.2.0"
+torch = "^2.0.1"
+transformers = "^4.31.0"
+structlog = "^23.1.0"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
