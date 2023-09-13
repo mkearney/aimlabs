@@ -22,7 +22,7 @@ class Conductor:
 
     def __call__(self, data_dir: str, fraction: float = 1.0, *args, **kwargs):
         args = self.args(**kwargs)
-        args += ["--data-dir", data_dir, "--fraction", str(fraction)]
+        args += [f"--data-dir {data_dir}", f"--fraction {str(fraction)}"]
         call = self.cmd + " \\\n    " + " \\\n    ".join(args)
         self.run(call)
 
@@ -31,13 +31,13 @@ conductor = Conductor()
 
 conductor(
     "/Users/mwk/data/imdb",
-    batch_size=64,
+    batch_size=32,
     best_metric="val_acc",
-    dropout=0.1,
+    dropout=0.2,
     lr=1e-4,
     early_stopping_patience=16,
     gamma=0.5,
-    max_len=100,
+    max_len=200,
     model="distilbert-base-uncased",
     name="imdbsentiment",
     num_classes=2,
