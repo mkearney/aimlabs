@@ -17,13 +17,20 @@ make test
 ## Usage
 
 ```bash
-.venv/bin/python scripts/train.py \
-    --num-epochs 32 \
-    --gamma 0.8 \
-    --num-steps 16 \
+training/.venv/bin/python training/scripts/train.py \
+    --data-dir /Users/mwk/data/imdb \
+    --batch-size 64 \
+    --best-metric val_acc \
+    --dropout 0.2 \
+    --early-stopping-patience 3 \
+    --gamma 0.5 \
     --lr 0.0001 \
-    --batch-size 128 \
-    --name imdbsent
+    --max-len 100 \
+    --model roberta-base \
+    --name imdbsentiment \
+    --num-classes 2 \
+    --num-epochs 16 \
+    --num-steps 8
 ```
 
 ## Training
