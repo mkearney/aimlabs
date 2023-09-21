@@ -36,29 +36,24 @@ class Model(nn.Module):
         self.max_len = hyperparameters.max_len
 
         # model architecture
-        if hyperparameters.num_output_dims > 0:
-            self.fc = nn.Linear(
-                hyperparameters.num_output_dims, self.hyperparameters.num_classes
-            )
-            self._init_weights(self.fc)
-        else:
-            self.fc = lambda x: x
         logging.set_verbosity_error()
         self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.model)
         self.model = load_model(hyperparameters, label_map=self.label_map)
         logging.set_verbosity_warning()
         if hyperparameters.freeze:
             self.freeze()
+        if hyperparameters.num_output_dims > 0:
+            self.fc = nn.Linear(
+                hyperparameters.num_output_dims, self.hyperparameters.num_classes
+            )
+            self._init_weights(self.fc)
+        else:
+            self.fc = nn.Identity()
 
     def _init_weights(self, module):
         """Initialize the weights"""
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.5)
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        if isinstance(module, nn.Linear) and module.bias is not None:
-            module.bias.data.zero_()
+        module.weight.data.normal_(mean=0.0, std=0.1)
+        module.bias.data.zero_()
 
     def freeze(self):
         """Freeze base model parameters"""
