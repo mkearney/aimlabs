@@ -76,19 +76,27 @@ def model_size(model: torch.nn.Module) -> Dict[str, str]:
         - dictionary with "parameters" (the number of parameters) and
             "memory" (the amount of memory used in MB)
     """
-    param_count = sum(param.numel() for param in model.parameters())
+    # total number of parameters
+    num_params = sum(param.numel() for param in model.parameters())
+    num_buffers = sum(buffer.numel() for buffer in model.buffers())
+    parameters = num_params + num_buffers
+
+    # number of trainable parameters
+    trainables = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    # total size of parameters and buffers
     param_size = sum(
         param.nelement() * param.element_size() for param in model.parameters()
     )
-    buffer_count = sum(buffer.numel() for buffer in model.buffers())
     buffer_size = sum(
         buffer.nelement() * buffer.element_size() for buffer in model.buffers()
     )
     memory = (param_size + buffer_size) / 1024**2
-    parameters = param_count + buffer_count
+    # format for printing/logging and return
     return {
         "parameters": f"{parameters:,}",
-        "memory": f"{memory:,.1f} MB",
+        "trainable": f"{trainables:,}",
+        "memory": f"{memory:,.1f}MB",
     }
 
 

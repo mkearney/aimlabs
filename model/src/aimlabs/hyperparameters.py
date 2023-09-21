@@ -11,6 +11,7 @@ class HyperParameters(BaseModel):
         - `dropout`: dropout rate
         - `early_stopping_patience`: number of consecutive epochs without
             improving best mark
+        - `freeze`: whether or not to freeze layers
         - `gamma`: discount factor
         - `lr_patience`: patience for learning rate scheduler
         - `lr`: learning rate
@@ -26,9 +27,10 @@ class HyperParameters(BaseModel):
     """
 
     batch_size: int = 64
-    best_metric: str = "loss"
+    best_metric: str = "val_loss"
     dropout: float = 0.2
     early_stopping_patience: int = 4
+    freeze: bool = False
     gamma: float = 0.8
     lr_patience: int = 0
     lr: float = 2e-04

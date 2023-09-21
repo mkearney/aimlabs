@@ -1,4 +1,4 @@
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from datetime import datetime
 from pathlib import Path
 
@@ -30,6 +30,7 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--dropout", type=float)
     parser.add_argument("--early-stopping-patience", type=int)
     parser.add_argument("--fraction", type=float, default=1.0)
+    parser.add_argument("--freeze", action=BooleanOptionalAction)
     parser.add_argument("--gamma", type=float)
     parser.add_argument("--lr-patience", type=int)
     parser.add_argument("--lr", type=float)
@@ -82,19 +83,6 @@ def main(args: Namespace):
 
     model = Model(hyperparameters=hp)
     logger.info("_mdsz_", **model_size(model))
-    optimizer = optim.AdamW(
-        model.parameters(),  # type: ignore
-        lr=hp.lr,
-        eps=1e-8,
-    )  # type: ignore
-    lr_scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="min" if "loss" in hp.best_metric else "max",
-        factor=hp.gamma,
-        patience=hp.lr_patience,
-        verbose=False,
-    )
-    criterion = nn.CrossEntropyLoss()
 
     # preprocess data
     train_inputs = model.preprocess(train_df["text"].to_list())
@@ -138,6 +126,19 @@ def main(args: Namespace):
     )  # type: ignore
     metrics = Metrics()
     best_metric = BestMetric(metric=hp.best_metric)
+    optimizer = optim.AdamW(
+        model.parameters(),  # type: ignore
+        lr=hp.lr,
+        eps=1e-8,
+    )  # type: ignore
+    lr_scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode=best_metric.mode,
+        factor=hp.gamma,
+        patience=hp.lr_patience,
+        verbose=False,
+    )
+    criterion = nn.CrossEntropyLoss()
 
     # train loop
     try:

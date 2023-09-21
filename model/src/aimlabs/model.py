@@ -7,6 +7,99 @@ from aimlabs.hyperparameters import HyperParameters
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, logging
 
 
+class Model(nn.Module):
+    """
+    Initialize a pretrained torch module model
+
+    ### Args
+        - `hyperparameters` HyperParameters used to initialize the model.
+        - `label_map` A map from target label to target index.
+    """
+
+    def __init__(
+        self,
+        hyperparameters: HyperParameters,
+        label_map: Optional[Dict[str, int]] = None,
+    ):
+        super(Model, self).__init__()
+        # model settings
+        self.version = datetime.now().strftime(
+            f"{hyperparameters.version}.%Y%m%d%H%M%S"
+        )
+        if label_map:
+            self.label_map = label_map
+        else:
+            self.label_map: Dict[str, int] = {
+                str(i): i for i in range(hyperparameters.num_classes)
+            }
+        self.hyperparameters = hyperparameters
+        self.max_len = hyperparameters.max_len
+
+        # model architecture
+        logging.set_verbosity_error()
+        self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.model)
+        self.model = load_model(hyperparameters, label_map=self.label_map)
+        logging.set_verbosity_warning()
+        if hyperparameters.freeze:
+            self.freeze()
+
+    def freeze(self):
+        """Freeze base model parameters"""
+        for param in self.model.base_model.parameters():  # type: ignore
+            param.requires_grad = False
+
+    def preprocess(self, messages: List[str]) -> Dict[str, torch.Tensor]:
+        """
+        Preprocess messages
+
+        ### Args
+            - `messages` A list (batch) of messages to be preprocessed.
+
+        ### Returns
+            - A dictionary of tokenization results.
+        """
+        return self.tokenizer(
+            messages,
+            return_tensors="pt",
+            truncation=True,
+            max_length=self.max_len,
+            add_special_tokens=True,
+            padding="max_length",
+        )  # type: ignore
+
+    def forward_raw(self, messages: List[str]) -> torch.Tensor:
+        """
+        Forward pass of neural network
+
+        ### Args
+            - `messages` A list (batch) of messages to be processed
+
+        ### Returns
+            - Tensor of shape (batch_size, num_classes) containing output logits
+        """
+        inputs = self.preprocess(messages)
+        return self.forward(**inputs)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        targets: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass of neural network
+
+        ### Args
+            - `input_ids` Indices
+            - `attention_mask` Masks
+
+        ### Returns
+            - Tensor of shape (batch_size, num_classes) containing output logits
+        """
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        return outputs.logits
+
+
 def change_dropout(config: Dict[str, Any], dropout: float = 0.0) -> Dict[str, Any]:
     """
     Adjust config dictionary with desired dropout
@@ -85,89 +178,3 @@ def load_model(
     model = new_model(config_dict)
     logging.set_verbosity_warning()
     return model
-
-
-class Model(nn.Module):
-    """
-    Initialize a pretrained torch module model
-
-    ### Args
-        - `hyperparameters` HyperParameters used to initialize the model.
-        - `label_map` A map from target label to target index.
-    """
-
-    def __init__(
-        self,
-        hyperparameters: HyperParameters,
-        label_map: Optional[Dict[str, int]] = None,
-    ):
-        super(Model, self).__init__()
-        # model settings
-        self.version = datetime.now().strftime(
-            f"{hyperparameters.version}.%Y%m%d%H%M%S"
-        )
-        if label_map:
-            self.label_map = label_map
-        else:
-            self.label_map: Dict[str, int] = {
-                str(i): i for i in range(hyperparameters.num_classes)
-            }
-        self.hyperparameters = hyperparameters
-        self.max_len = hyperparameters.max_len
-
-        # model architecture
-        logging.set_verbosity_error()
-        self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.model)
-        self.model = load_model(hyperparameters, label_map=self.label_map)
-        logging.set_verbosity_warning()
-
-    def preprocess(self, messages: List[str]) -> Dict[str, torch.Tensor]:
-        """
-        Preprocess messages
-
-        ### Args
-            - `messages` A list (batch) of messages to be preprocessed.
-
-        ### Returns
-            - A dictionary of tokenization results.
-        """
-        return self.tokenizer(
-            messages,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_len,
-            add_special_tokens=True,
-            padding="max_length",
-        )  # type: ignore
-
-    def forward_raw(self, messages: List[str]) -> torch.Tensor:
-        """
-        Forward pass of neural network
-
-        ### Args
-            - `messages` A list (batch) of messages to be processed
-
-        ### Returns
-            - Tensor of shape (batch_size, num_classes) containing output logits
-        """
-        inputs = self.preprocess(messages)
-        return self.forward(**inputs)
-
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        targets: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Forward pass of neural network
-
-        ### Args
-            - `input_ids` Indices
-            - `attention_mask` Masks
-
-        ### Returns
-            - Tensor of shape (batch_size, num_classes) containing output logits
-        """
-        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        return outputs.logits
