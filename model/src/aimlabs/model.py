@@ -40,6 +40,7 @@ class Model(nn.Module):
             self.fc = nn.Linear(
                 hyperparameters.num_output_dims, self.hyperparameters.num_classes
             )
+            self._init_weights(self.fc)
         else:
             self.fc = lambda x: x
         logging.set_verbosity_error()
@@ -48,6 +49,16 @@ class Model(nn.Module):
         logging.set_verbosity_warning()
         if hyperparameters.freeze:
             self.freeze()
+
+    def _init_weights(self, module):
+        """Initialize the weights"""
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            module.weight.data.normal_(mean=0.0, std=0.5)
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        if isinstance(module, nn.Linear) and module.bias is not None:
+            module.bias.data.zero_()
 
     def freeze(self):
         """Freeze base model parameters"""
