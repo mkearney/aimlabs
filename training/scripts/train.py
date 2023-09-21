@@ -39,7 +39,8 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--model", type=str)
     parser.add_argument("--name", type=str)
     parser.add_argument("--num-classes", type=int)
-    parser.add_argument("--num-dims", type=int)
+    parser.add_argument("--num-base-dims", type=int)
+    parser.add_argument("--num-output-dims", type=int)
     parser.add_argument("--num-epochs", type=int)
     parser.add_argument("--num-layers", type=int)
     parser.add_argument("--num-steps", type=int)
@@ -150,6 +151,12 @@ def main(args: Namespace):
             model.train()  # type: ignore
             for i, data in enumerate(train_dataloader):
                 outputs = model(**data)
+                if i == 0 and epoch == 0:
+                    logger.info(
+                        "shapes",
+                        outputs=list(outputs.shape),
+                        targets=list(data["targets"].shape),
+                    )
                 loss = criterion(outputs, data["targets"].long())
                 loss.backward()
                 optimizer.step()

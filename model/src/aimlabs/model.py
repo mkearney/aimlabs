@@ -36,6 +36,12 @@ class Model(nn.Module):
         self.max_len = hyperparameters.max_len
 
         # model architecture
+        if hyperparameters.num_output_dims > 0:
+            self.fc = nn.Linear(
+                hyperparameters.num_output_dims, self.hyperparameters.num_classes
+            )
+        else:
+            self.fc = lambda x: x
         logging.set_verbosity_error()
         self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.model)
         self.model = load_model(hyperparameters, label_map=self.label_map)
@@ -97,7 +103,7 @@ class Model(nn.Module):
             - Tensor of shape (batch_size, num_classes) containing output logits
         """
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        return outputs.logits
+        return self.fc(outputs.logits)
 
 
 def change_dropout(config: Dict[str, Any], dropout: float = 0.0) -> Dict[str, Any]:
@@ -156,23 +162,32 @@ def load_model(
         - `hyperparameters` (HyperParameters): desired hyperparameters
         - `label_map` (Dict[str, int]): A map from target label to target index
     """
-    rev_label_map = {v: k for k, v in label_map.items()}
+
     logging.set_verbosity_error()
-    init_model = AutoModelForSequenceClassification.from_pretrained(
-        hyperparameters.model,
-        num_labels=hyperparameters.num_classes,
-        id2label=rev_label_map,
-        label2id=label_map,
-        max_length=hyperparameters.max_len,
-    )
+    if hyperparameters.num_output_dims > 0:
+        init_model = AutoModelForSequenceClassification.from_pretrained(
+            hyperparameters.model,
+            num_labels=hyperparameters.num_output_dims,
+            max_length=hyperparameters.max_len,
+        )
+    else:
+        rev_label_map = {v: k for k, v in label_map.items()}
+        init_model = AutoModelForSequenceClassification.from_pretrained(
+            hyperparameters.model,
+            num_labels=hyperparameters.num_classes,
+            id2label=rev_label_map,
+            label2id=label_map,
+            max_length=hyperparameters.max_len,
+        )
+
     new_args = {
         "max_len": hyperparameters.max_len,
     }
     if hyperparameters.num_layers > 0:
         new_args["n_layers"] = hyperparameters.num_layers
-    if hyperparameters.num_dims > 0:
-        new_args["dim"] = hyperparameters.num_dims
-        new_args["hidden_dim"] = hyperparameters.num_dims * 4
+    if hyperparameters.num_base_dims > 0:
+        new_args["dim"] = hyperparameters.num_base_dims
+        new_args["hidden_dim"] = hyperparameters.num_base_dims * 4
     config_dict = change_config(init_model.config.__dict__, **new_args)
     config_dict = change_dropout(config_dict, dropout=hyperparameters.dropout)
     model = new_model(config_dict)
