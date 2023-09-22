@@ -44,41 +44,23 @@ class Model(nn.Module):
             self.freeze()
         if hyperparameters.num_output_dims > 0:
             self.fc = nn.Sequential(
+                nn.LayerNorm(hyperparameters.num_output_dims),
                 nn.Dropout(hyperparameters.dropout),
                 nn.Linear(
-                    hyperparameters.num_output_dims, self.hyperparameters.num_classes
+                    hyperparameters.num_output_dims,
+                    self.hyperparameters.num_classes,
                 ),
             )
             self.init_weights(self.fc)
         else:
             self.fc = nn.Identity()
 
-    def init_layer(self, layer):
-        if hasattr(layer, "weight"):
-            layer.weight.data.normal_(
-                mean=0.0,
-                std=(self.hyperparameters.lr * self.hyperparameters.num_output_dims)
-                ** 2,
-            )
-        if hasattr(layer, "bias"):
-            layer.bias.data.zero_()
-
-    def init_param(self, param):
-        if param.dim() > 1:
-            param.data.normal_(
-                mean=0.0,
-                std=(self.hyperparameters.lr * self.hyperparameters.num_output_dims)
-                ** 2,
-            )
-        else:
-            nn.init.constant_(param.data, 0.0)
-
-    def init_weights(self, module):
-        for layer in module.modules():  # type: ignore
-            self.init_layer(layer)
-
-        for param in module.parameters():  # type: ignore
-            self.init_param(param)
+    def init_weights(self, modules):
+        for param in modules.parameters():  # type: ignore
+            if param.dim() > 1:
+                param.data.normal_(mean=0.0, std=0.5)
+            else:
+                param.data.zero_()
 
     def freeze(self):
         """Freeze base model parameters"""
@@ -194,7 +176,6 @@ def load_model(
         - `label_map` (Dict[str, int]): A map from target label to target index
     """
 
-    logging.set_verbosity_error()
     if hyperparameters.num_output_dims > 0:
         init_model = AutoModelForSequenceClassification.from_pretrained(
             hyperparameters.model,
@@ -222,5 +203,4 @@ def load_model(
     config_dict = change_config(init_model.config.__dict__, **new_args)
     # config_dict = change_dropout(config_dict, dropout=hyperparameters.dropout)
     model = new_model(config_dict)
-    logging.set_verbosity_warning()
     return model
