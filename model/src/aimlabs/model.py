@@ -43,17 +43,42 @@ class Model(nn.Module):
         if hyperparameters.freeze:
             self.freeze()
         if hyperparameters.num_output_dims > 0:
-            self.fc = nn.Linear(
-                hyperparameters.num_output_dims, self.hyperparameters.num_classes
+            self.fc = nn.Sequential(
+                nn.Dropout(hyperparameters.dropout),
+                nn.Linear(
+                    hyperparameters.num_output_dims, self.hyperparameters.num_classes
+                ),
             )
-            self._init_weights(self.fc)
+            self.init_weights(self.fc)
         else:
             self.fc = nn.Identity()
 
-    def _init_weights(self, module):
-        """Initialize the weights"""
-        module.weight.data.normal_(mean=0.0, std=0.1)
-        module.bias.data.zero_()
+    def init_layer(self, layer):
+        if hasattr(layer, "weight"):
+            layer.weight.data.normal_(
+                mean=0.0,
+                std=(self.hyperparameters.lr * self.hyperparameters.num_output_dims)
+                ** 2,
+            )
+        if hasattr(layer, "bias"):
+            layer.bias.data.zero_()
+
+    def init_param(self, param):
+        if param.dim() > 1:
+            param.data.normal_(
+                mean=0.0,
+                std=(self.hyperparameters.lr * self.hyperparameters.num_output_dims)
+                ** 2,
+            )
+        else:
+            nn.init.constant_(param.data, 0.0)
+
+    def init_weights(self, module):
+        for layer in module.modules():  # type: ignore
+            self.init_layer(layer)
+
+        for param in module.parameters():  # type: ignore
+            self.init_param(param)
 
     def freeze(self):
         """Freeze base model parameters"""
@@ -195,7 +220,7 @@ def load_model(
         new_args["dim"] = hyperparameters.num_base_dims
         new_args["hidden_dim"] = hyperparameters.num_base_dims * 4
     config_dict = change_config(init_model.config.__dict__, **new_args)
-    config_dict = change_dropout(config_dict, dropout=hyperparameters.dropout)
+    # config_dict = change_dropout(config_dict, dropout=hyperparameters.dropout)
     model = new_model(config_dict)
     logging.set_verbosity_warning()
     return model
