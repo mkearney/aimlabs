@@ -32,6 +32,7 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--fraction", type=float, default=1.0)
     parser.add_argument("--freeze", action=BooleanOptionalAction)
     parser.add_argument("--gamma", type=float)
+    parser.add_argument("--init-std", type=float)
     parser.add_argument("--lr-patience", type=int)
     parser.add_argument("--lr", type=float)
     parser.add_argument("--data-dir", type=str)
@@ -44,6 +45,7 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--num-epochs", type=int)
     parser.add_argument("--num-layers", type=int)
     parser.add_argument("--num-steps", type=int)
+    parser.add_argument("--save-model", action=BooleanOptionalAction)
     parser.add_argument("--version", type=str)
     return parser
 
@@ -83,7 +85,7 @@ def main(args: Namespace):
         logger.info("__hp__", **{k: v})
 
     model = Model(hyperparameters=hp)
-    logger.info("_mdsz_", **model_size(model))
+    logger.info("_size_", **model_size(model))
 
     # preprocess data
     train_inputs = model.preprocess(train_df["text"].to_list())
@@ -153,7 +155,7 @@ def main(args: Namespace):
                 outputs = model(**data)
                 if i == 0 and epoch == 0:
                     logger.info(
-                        "shapes",
+                        "_dims_",
                         outputs=list(outputs.shape),
                         targets=list(data["targets"].shape),
                     )
@@ -181,7 +183,7 @@ def main(args: Namespace):
             lr_scheduler.step(epoch_metrics[best_metric.metric])
             if best_metric.early_stop_counter >= hp.early_stopping_patience:
                 logger.info(
-                    "__early_stopping__", es_counter=best_metric.early_stop_counter
+                    "_stop_", early_stopping_counter=best_metric.early_stop_counter
                 )
                 break
     except KeyboardInterrupt:
@@ -189,16 +191,16 @@ def main(args: Namespace):
 
     # training duration
     end_time = datetime.now()
-    logger.info("__end__", time=end_time.strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("_end__", time=end_time.strftime("%Y-%m-%d %H:%M:%S"))
     duration = end_time - start_time
     if duration.total_seconds() <= 120:
-        logger.info("duration", seconds=f"{duration.total_seconds():,.2f}")
+        logger.info("_dur__", seconds=f"{duration.total_seconds():,.2f}")
     else:
-        logger.info("duration", minutes=f"{duration.total_seconds()/60:,.2f}")
+        logger.info("_dur__", minutes=f"{duration.total_seconds()/60:,.2f}")
 
     # best epoch logging
     logger.info(
-        "best_metric",
+        "_best_",
         _epoch=best_metric.epoch,
         _metric=best_metric.metric,
         _value=f"{best_metric.value:.4f}",
@@ -233,7 +235,7 @@ def main(args: Namespace):
             tpr = sum(prs) / denom
             trc = sum(rcs) / denom
             logger.info(
-                "test",
+                "_test_",
                 loss=f"{tlss:.4f}",
                 acc=f"{tacc:.4f}",
                 f1=f"{tf1:.4f}",
@@ -250,8 +252,8 @@ def main(args: Namespace):
         output_dir="/Users/mwk/models/meta",
         version=model.version,  # type: ignore
     )
-    logger.info("__metadata__", hyperparameters=hyperparameters_path)
-    logger.info("__metadata__", metrics=saved_as)
+    logger.info("_meta_", hyperparameters=hyperparameters_path)
+    logger.info("_meta_", metrics=saved_as)
 
 
 if __name__ == "__main__":

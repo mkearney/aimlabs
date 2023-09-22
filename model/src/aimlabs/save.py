@@ -27,19 +27,22 @@ class ModelSaver:
             model.state_dict(),
             path := str(self.path.joinpath("state_dict.pt")),
         )
-        self.logger.info("__save__", state_dict=path)
+        self.logger.info("_save_", state_dict=path)
 
     def save_hyperparameters(self, model: Model) -> None:
         with open(path := str(self.path.joinpath("hyperparameters.json")), "w") as f:
             json.dump(model.hyperparameters.__dict__, f)
-        self.logger.info("__save__", hyperparameters=path)
+        self.logger.info("_save_", hyperparameters=path)
 
     def save_metrics(self, metrics: Dict[str, Any]) -> None:
         with open(path := str(self.path.joinpath("metrics.json")), "w") as f:
             json.dump(metrics, f)
-        self.logger.info("__save__", metrics=path)
+        self.logger.info("_save_", metrics=path)
 
     def save(self, model: Model, metrics: Dict[str, Any]) -> None:
-        self.save_state_dict(model)
-        self.save_hyperparameters(model)
-        self.save_metrics(metrics)
+        if model.hyperparameters.save_model:
+            self.save_state_dict(model)
+            self.save_hyperparameters(model)
+            self.save_metrics(metrics)
+        else:
+            self.logger.info("nosave", state_dict=None)

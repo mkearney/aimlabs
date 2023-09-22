@@ -58,7 +58,7 @@ class Model(nn.Module):
     def init_weights(self, modules):
         for param in modules.parameters():  # type: ignore
             if param.dim() > 1:
-                param.data.normal_(mean=0.0, std=0.5)
+                param.data.normal_(mean=0.0, std=self.hyperparameters.init_std)
             else:
                 param.data.zero_()
 
@@ -201,6 +201,6 @@ def load_model(
         new_args["dim"] = hyperparameters.num_base_dims
         new_args["hidden_dim"] = hyperparameters.num_base_dims * 4
     config_dict = change_config(init_model.config.__dict__, **new_args)
-    # config_dict = change_dropout(config_dict, dropout=hyperparameters.dropout)
+    config_dict = change_dropout(config_dict, dropout=0)
     model = new_model(config_dict)
     return model
