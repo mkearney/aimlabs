@@ -40,10 +40,8 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--model", type=str)
     parser.add_argument("--name", type=str)
     parser.add_argument("--num-classes", type=int)
-    parser.add_argument("--num-base-dims", type=int)
     parser.add_argument("--num-output-dims", type=int)
     parser.add_argument("--num-epochs", type=int)
-    parser.add_argument("--num-layers", type=int)
     parser.add_argument("--num-steps", type=int)
     parser.add_argument("--save-model", action=BooleanOptionalAction)
     parser.add_argument("--version", type=str)
@@ -86,6 +84,8 @@ def main(args: Namespace):
 
     model = Model(hyperparameters=hp)
     logger.info("_size_", **model_size(model))
+    # for k, v in model.model.config.__dict__.items():
+    #     logger.info("_cfg__", **{k: v})
 
     # preprocess data
     train_inputs = model.preprocess(train_df["text"].to_list())

@@ -18,10 +18,8 @@ class HyperParameters(BaseModel):
         - `max_len`: maximum length of a sequence
         - `model`: model to use
         - `name`: model name
-        - `num_base_dims`: number of dimensions in base model
         - `num_classes`: number of classes
         - `num_epochs`: number of epochs
-        - `num_layers`: number of layers
         - `num_output_dims`: number of dimensions in output model
         - `num_steps`: number of steps
         - `save_model`: whether to save model
@@ -40,10 +38,8 @@ class HyperParameters(BaseModel):
     max_len: int = 16
     model: str = "distilbert-base-uncased"
     name: str = "nlpmodel"
-    num_base_dims: int = 0
     num_classes: int = 2
     num_epochs: int = 32
-    num_layers: int = 0
     num_output_dims: int = 16
     num_steps: int = 16
     save_model: bool = False

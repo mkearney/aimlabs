@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -37,23 +37,24 @@ class Model(nn.Module):
 
         # model architecture
         logging.set_verbosity_error()
-        self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.model)
-        self.model = load_model(hyperparameters, label_map=self.label_map)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            hyperparameters.model,
+            num_labels=hyperparameters.num_classes,
+            max_length=hyperparameters.max_len,
+            output_hidden_states=True,
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            hyperparameters.model, **self.model.config.__dict__
+        )
         logging.set_verbosity_warning()
         if hyperparameters.freeze:
             self.freeze()
-        if hyperparameters.num_output_dims > 0:
-            self.fc = nn.Sequential(
-                nn.LayerNorm(hyperparameters.num_output_dims),
-                nn.Dropout(hyperparameters.dropout),
-                nn.Linear(
-                    hyperparameters.num_output_dims,
-                    self.hyperparameters.num_classes,
-                ),
-            )
-            self.init_weights(self.fc)
-        else:
-            self.fc = nn.Identity()
+        self.fc = nn.Linear(
+            self.model.config.dim * 2,
+            self.hyperparameters.num_classes,
+        )
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
 
     def init_weights(self, modules):
         for param in modules.parameters():  # type: ignore
@@ -111,96 +112,15 @@ class Model(nn.Module):
         ### Args
             - `input_ids` Indices
             - `attention_mask` Masks
+            - `targets` Labels, optional
 
         ### Returns
             - Tensor of shape (batch_size, num_classes) containing output logits
         """
-        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        return self.fc(outputs.logits)
-
-
-def change_dropout(config: Dict[str, Any], dropout: float = 0.0) -> Dict[str, Any]:
-    """
-    Adjust config dictionary with desired dropout
-
-    ### Args:
-        - `config` (Dict[str, Any]): config dictionary
-        - `dropout` (float, optional): desired dropout. Defaults to 0.0.
-    """
-    if "seq_classif_dropout" in config:
-        config["seq_classif_dropout"] = dropout
-    elif "hidden_dropout_prob" in config:
-        config["hidden_dropout_prob"] = dropout
-    elif "dropout" in config:
-        config["dropout"] = dropout
-    return config
-
-
-def change_config(config: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-    """
-    Adjust config dictionary with named arguments
-
-    ### Args:
-        - `config` (Dict[str, Any]): config dictionary
-        - `kwargs` (Dict[str, Any]): named arguments
-    """
-    for param, value in kwargs.items():
-        for k, v in config.items():
-            if param in k:
-                config[k] = value
-    return config
-
-
-def new_model(config_dict: Dict[str, Any]) -> nn.Module:
-    """
-    Initialize new automodel from config dictionary
-
-    ### Args:
-        - `config` (Dict[str, Any]): config dictionary
-    """
-    return AutoModelForSequenceClassification.from_pretrained(
-        config_dict["_name_or_path"],
-        **config_dict,
-        ignore_mismatched_sizes=True,
-    )
-
-
-def load_model(
-    hyperparameters: HyperParameters, label_map: Dict[str, int]
-) -> nn.Module:
-    """
-    Load, adjust, and reload automodel
-
-    ### Args:
-        - `hyperparameters` (HyperParameters): desired hyperparameters
-        - `label_map` (Dict[str, int]): A map from target label to target index
-    """
-
-    if hyperparameters.num_output_dims > 0:
-        init_model = AutoModelForSequenceClassification.from_pretrained(
-            hyperparameters.model,
-            num_labels=hyperparameters.num_output_dims,
-            max_length=hyperparameters.max_len,
-        )
-    else:
-        rev_label_map = {v: k for k, v in label_map.items()}
-        init_model = AutoModelForSequenceClassification.from_pretrained(
-            hyperparameters.model,
-            num_labels=hyperparameters.num_classes,
-            id2label=rev_label_map,
-            label2id=label_map,
-            max_length=hyperparameters.max_len,
-        )
-
-    new_args = {
-        "max_len": hyperparameters.max_len,
-    }
-    if hyperparameters.num_layers > 0:
-        new_args["n_layers"] = hyperparameters.num_layers
-    if hyperparameters.num_base_dims > 0:
-        new_args["dim"] = hyperparameters.num_base_dims
-        new_args["hidden_dim"] = hyperparameters.num_base_dims * 4
-    config_dict = change_config(init_model.config.__dict__, **new_args)
-    config_dict = change_dropout(config_dict, dropout=0)
-    model = new_model(config_dict)
-    return model
+        outputs = self.model(
+            input_ids=input_ids, attention_mask=attention_mask
+        ).hidden_states[-1]
+        max_pooled = self.max_pool(outputs.permute(0, 2, 1)).squeeze(-1)
+        avg_pooled = self.avg_pool(outputs.permute(0, 2, 1)).squeeze(-1)
+        pooled = torch.cat((max_pooled, avg_pooled), dim=1)
+        return self.fc(pooled)
