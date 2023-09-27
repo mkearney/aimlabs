@@ -158,3 +158,4 @@ cython_debug/
 /data
 aimlabs.code-workspace
 .DS_Store
+training/conductor.py
