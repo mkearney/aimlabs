@@ -10,7 +10,7 @@ make develop
 
 ## Testing
 
-```bash
+```bash1
 make test
 ```
 
@@ -19,20 +19,22 @@ make test
 ```bash
 .venv/bin/python ./scripts/train.py \
     --data-dir /Users/mwk/data/imdb \
-    --batch-size 64 \
-    --best-metric val_acc \
-    --dropout 0.1 \
-    --fraction 0.5 \
-    --freeze \
-    --lr 0.0002 \
-    --max-len 32 \
+    --batch-size 32 \
+    --best-metric val_loss \
+    --dropout 0.2 \
+    --early_stopping_patience 6 \
+    --eps 1e-10 \
+    --no-freeze \
+    --init-std 0.01 \
+    --lr 5e-5 \
+    --max-len 128 \
     --model distilbert-base-uncased \
     --name imdbsentiment \
     --num-classes 2 \
     --num-epochs 16 \
-    --num-steps 16
+    --num-hidden 0 \
+    --num-steps 32
 ```
-
 
 ## Models
 

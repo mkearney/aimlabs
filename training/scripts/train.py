@@ -29,18 +29,20 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--best-metric", type=str)
     parser.add_argument("--dropout", type=float)
     parser.add_argument("--early-stopping-patience", type=int)
+    parser.add_argument("--eps", type=float)
     parser.add_argument("--fraction", type=float, default=1.0)
     parser.add_argument("--freeze", action=BooleanOptionalAction)
     parser.add_argument("--gamma", type=float)
+    parser.add_argument("--hard-freeze", action=BooleanOptionalAction)
     parser.add_argument("--init-std", type=float)
     parser.add_argument("--lr-patience", type=int)
     parser.add_argument("--lr", type=float)
-    parser.add_argument("--data-dir", type=str)
+    parser.add_argument("--data-dir", type=str, default="/Users/mwk/data/imdb")
     parser.add_argument("--max-len", type=int)
     parser.add_argument("--model", type=str)
     parser.add_argument("--name", type=str)
     parser.add_argument("--num-classes", type=int)
-    parser.add_argument("--num-output-dims", type=int)
+    parser.add_argument("--num-hidden", type=int)
     parser.add_argument("--num-epochs", type=int)
     parser.add_argument("--num-steps", type=int)
     parser.add_argument("--save-model", action=BooleanOptionalAction)
@@ -53,12 +55,15 @@ def parse_args() -> Namespace:
     return parser.parse_args()
 
 
+# intractive dev
+# args = get_parser().parse_args([])
+
+
 def main(args: Namespace):
     logger = get_logger(args.version, args.name)
     start_time = datetime.now()
     logger.info("_init_", time=start_time.strftime("%Y-%m-%d %H:%M:%S"))
 
-    # data
     data_dir = Path(args.data_dir)
     train_df = pl.read_parquet(data_dir.joinpath("train.parquet"))
     valid_df = pl.read_parquet(data_dir.joinpath("valid.parquet"))
@@ -66,7 +71,6 @@ def main(args: Namespace):
     label_map = {
         label: idx for idx, label in enumerate(train_df["label"].unique().sort())
     }
-    train_df = train_df.with_columns(target=pl.col("label").map_dict(label_map))
 
     if args.fraction < 1.0:
         train_df = train_df.sample(fraction=args.fraction, shuffle=True)
@@ -84,41 +88,42 @@ def main(args: Namespace):
 
     model = Model(hyperparameters=hp)
     logger.info("_size_", **model_size(model))
-    # for k, v in model.model.config.__dict__.items():
-    #     logger.info("_cfg__", **{k: v})
 
-    # preprocess data
     train_inputs = model.preprocess(train_df["text"].to_list())
     valid_inputs = model.preprocess(valid_df["text"].to_list())
     test_inputs = model.preprocess(test_df["text"].to_list())
-    train_targets = torch.tensor(
+    train_labels = torch.tensor(
         train_df["label"].map_dict(label_map).to_list(), dtype=torch.int64
     )
-    valid_targets = torch.tensor(
+    valid_labels = torch.tensor(
         valid_df["label"].map_dict(label_map).to_list(), dtype=torch.int64
     )
-    test_targets = torch.tensor(
+    test_labels = torch.tensor(
         test_df["label"].map_dict(label_map).to_list(), dtype=torch.int64
     )
-    # create datasets
     train_data = InputsDataset(
         input_ids=train_inputs["input_ids"],  # type: ignore
         attention_mask=train_inputs["attention_mask"],  # type: ignore
-        targets=train_targets,
+        labels=train_labels,
     )
     valid_data = InputsDataset(
         input_ids=valid_inputs["input_ids"],  # type: ignore
         attention_mask=valid_inputs["attention_mask"],  # type: ignore
-        targets=valid_targets,
+        labels=valid_labels,
     )
     test_data = InputsDataset(
         input_ids=test_inputs["input_ids"],  # type: ignore
         attention_mask=test_inputs["attention_mask"],  # type: ignore
-        targets=test_targets,
+        labels=test_labels,
     )
     train_dataloader = DataLoader(train_data, batch_size=hp.batch_size, shuffle=True)
     valid_dataloader = DataLoader(valid_data, batch_size=hp.batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=hp.batch_size, shuffle=True)
+    test_dataloader = DataLoader(
+        test_data,
+        batch_size=hp.batch_size,
+        shuffle=False,
+        drop_last=True,
+    )
     fit = Fit(num_classes=hp.num_classes)
 
     # train objects
@@ -132,7 +137,7 @@ def main(args: Namespace):
     optimizer = optim.AdamW(
         model.parameters(),  # type: ignore
         lr=hp.lr,
-        eps=1e-8,
+        eps=hp.eps,
     )  # type: ignore
     lr_scheduler = ReduceLROnPlateau(
         optimizer,
@@ -152,14 +157,7 @@ def main(args: Namespace):
             trn_epoch_loss = []
             model.train()  # type: ignore
             for i, data in enumerate(train_dataloader):
-                outputs = model(**data)
-                if i == 0 and epoch == 0:
-                    logger.info(
-                        "_dims_",
-                        outputs=list(outputs.shape),
-                        targets=list(data["targets"].shape),
-                    )
-                loss = criterion(outputs, data["targets"].long())
+                loss = model.train_step(data)
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
@@ -219,15 +217,13 @@ def main(args: Namespace):
             test_loss, acc, f1s, prs, rcs = [], [], [], [], []
             for i, data in enumerate(test_dataloader):
                 outputs = model(**data)  # type: ignore
-                loss = criterion(outputs, data["targets"].long())
-                fit_metrics = fit(outputs, data["targets"])
+                loss = criterion(outputs, data["labels"].long())
+                fit_metrics = fit(outputs, data["labels"])
                 acc.append(fit_metrics.acc)
                 f1s.append(fit_metrics.f1)
                 prs.append(fit_metrics.pr)
                 rcs.append(fit_metrics.rc)
                 test_loss.append(loss.item())
-                if i == hp.num_steps:
-                    break
             denom = len(acc)
             tacc = sum(acc) / denom
             tf1 = sum(f1s) / denom

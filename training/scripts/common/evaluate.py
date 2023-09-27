@@ -26,9 +26,9 @@ def evaluate(
     with torch.no_grad():
         for i, data in enumerate(dataloader):
             outputs = model(**data)  # type: ignore
-            loss = criterion(outputs, data["targets"].long())
+            loss = criterion(outputs, data["labels"].long())
             losses.append(loss.item())
-            fit_metrics = fit(outputs, data["targets"])
+            fit_metrics = fit(outputs, data["labels"])
             accs.append(fit_metrics.acc)
             f1s.append(fit_metrics.f1)
             prs.append(fit_metrics.pr)
