@@ -13,7 +13,6 @@ from transformers import (
     logging,
 )
 
-AutoConfig.from_pretrained("roberta-base")
 # create dict containing name of intermediate or hidden output dimension
 # for each model based on the default configuration file
 model_dimensions_name: Dict[str, str] = defaultdict(lambda: "hidden_size")
