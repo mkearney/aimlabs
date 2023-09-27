@@ -45,4 +45,6 @@ class ModelSaver:
             self.save_hyperparameters(model)
             self.save_metrics(metrics)
         else:
-            self.logger.info("nosave", state_dict=None)
+            self.logger.info(
+                "nosave", state_dict=None, hyperparameters=None, metrics=None
+            )

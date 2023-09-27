@@ -10,8 +10,10 @@ class HyperParameters(BaseModel):
         - `best_metric`: metric to use for early stopping
         - `dropout`: dropout rate
         - `early_stopping_patience`: number of epochs without improvement
+        - `eps`: epsilon for numerical stability
         - `freeze`: whether to freeze layers
         - `gamma`: discount factor
+        - `hard_freeze`: whether to hard freeze layers
         - `init_std`: variance of initialization
         - `lr_patience`: patience for learning rate scheduler
         - `lr`: learning rate
@@ -20,7 +22,7 @@ class HyperParameters(BaseModel):
         - `name`: model name
         - `num_classes`: number of classes
         - `num_epochs`: number of epochs
-        - `num_output_dims`: number of dimensions in output model
+        - `num_hidden`: number of trainable hidden dimensions
         - `num_steps`: number of steps
         - `save_model`: whether to save model
         - `version`: model version
@@ -30,8 +32,10 @@ class HyperParameters(BaseModel):
     best_metric: str = "val_loss"
     dropout: float = 0.2
     early_stopping_patience: int = 5
+    eps: float = 1e-08
     freeze: bool = True
     gamma: float = 0.8
+    hard_freeze: bool = False
     init_std: float = 1.5
     lr_patience: int = 0
     lr: float = 2e-04
@@ -40,7 +44,7 @@ class HyperParameters(BaseModel):
     name: str = "nlpmodel"
     num_classes: int = 2
     num_epochs: int = 32
-    num_output_dims: int = 16
+    num_hidden: int = 128
     num_steps: int = 16
     save_model: bool = False
     version: str = "0.1.0"
