@@ -4,6 +4,10 @@ Training pipelines for deep learning text classification models
 
 ## Installation
 
+The following make command will install the required dependencies along with
+the `aimlabs` package, which is found in the base `model/` directory of this
+repository.
+
 ```bash
 make develop
 ```
@@ -16,23 +20,26 @@ make test
 
 ## Usage
 
+Example of fine-tuning or transfer learning via `distilbert-base-uncased`
+on the task of sentiment classification using the IMDB reviews dataset.
+
 ```bash
 .venv/bin/python ./scripts/train.py \
     --data-dir /Users/mwk/data/imdb \
     --batch-size 32 \
     --best-metric val_loss \
-    --dropout 0.2 \
+    --dropout 0.3 \
     --early_stopping_patience 6 \
-    --eps 1e-10 \
+    --eps 1e-9 \
     --no-freeze \
-    --init-std 0.01 \
+    --init-std 0.02 \
     --lr 5e-5 \
     --max-len 128 \
     --model distilbert-base-uncased \
     --name imdbsentiment \
     --num-classes 2 \
-    --num-epochs 16 \
-    --num-hidden 0 \
+    --num-epochs 32 \
+    --num-hidden 200 \
     --num-steps 32
 ```
 

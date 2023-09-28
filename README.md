@@ -2,41 +2,14 @@
 
 Packaging and pipelines for deep learning text classification models
 
-## Installation
+## Repository Contents
 
-```bash
-make develop
-```
+### ./model
+A poetry-managed python package designed to help with model specification,
+preprocessing, training, and serving.
 
-## Testing
+### ./training
+A suite of scripts that function as model training pipelines.
 
-```bash
-make test
-```
-
-## Usage
-
-```bash
-training/.venv/bin/python training/scripts/train.py \
-    --data-dir /Users/mwk/data/imdb \
-    --batch-size 64 \
-    --best-metric val_acc \
-    --dropout 0.1 \
-    --fraction 0.5 \
-    --freeze \
-    --lr 0.0002 \
-    --max-len 32 \
-    --model distilbert-base-uncased \
-    --name imdbsentiment \
-    --num-classes 2 \
-    --num-epochs 16 \
-    --num-steps 16
-```
-
-## Training
-
-![](tools/readme/training-screenshot.png)
-
-## Testing
-
-![](tools/readme/pytest-screenshot.png)
+### ./tools
+Miscellaneous documentation and other resources
