@@ -68,7 +68,7 @@ def main(args: Namespace):
     train_df = pl.read_parquet(data_dir.joinpath("train.parquet"))
     valid_df = pl.read_parquet(data_dir.joinpath("valid.parquet"))
     test_df = pl.read_parquet(data_dir.joinpath("test.parquet"))
-    label_map = {
+    label2id = {
         label: idx for idx, label in enumerate(train_df["label"].unique().sort())
     }
 
@@ -93,13 +93,13 @@ def main(args: Namespace):
     valid_inputs = model.preprocess(valid_df["text"].to_list())
     test_inputs = model.preprocess(test_df["text"].to_list())
     train_labels = torch.tensor(
-        train_df["label"].map_dict(label_map).to_list(), dtype=torch.int64
+        train_df["label"].map_dict(label2id).to_list(), dtype=torch.int64
     )
     valid_labels = torch.tensor(
-        valid_df["label"].map_dict(label_map).to_list(), dtype=torch.int64
+        valid_df["label"].map_dict(label2id).to_list(), dtype=torch.int64
     )
     test_labels = torch.tensor(
-        test_df["label"].map_dict(label_map).to_list(), dtype=torch.int64
+        test_df["label"].map_dict(label2id).to_list(), dtype=torch.int64
     )
     train_data = InputsDataset(
         input_ids=train_inputs["input_ids"],  # type: ignore

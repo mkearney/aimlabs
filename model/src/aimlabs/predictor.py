@@ -17,7 +17,6 @@ class Prediction(BaseModel):
 class Predictor:
     def __init__(self, path: str):
         self.model = load_model(Path(path))
-        self.label_map = {v: k for k, v in self.model.label_map.items()}
 
     def predict(
         self,
@@ -45,7 +44,7 @@ class Predictor:
         batches = self.batch(msgs, bs)
         probas = torch.tensor([row for b in batches for row in self.model(b)])
         probas = torch.softmax(probas, 1)
-        labels = [self.label_map[i] for i in probas.argmax(1).tolist()]
+        labels = [self.model.id2label[i] for i in probas.argmax(1).tolist()]
         return [
             Prediction(label=label, proba=proba.tolist())
             for label, proba in zip(labels, probas)
@@ -55,7 +54,9 @@ class Predictor:
 def load_model(path: Path) -> Model:
     with path.joinpath("hyperparameters.json").open("r") as f:
         hp = HyperParameters(**json.load(f))
-    model = Model(hyperparameters=hp)
+    with path.joinpath("label2id.json").open("r") as f:
+        label2id = json.load(f)
+    model = Model(hyperparameters=hp, label2id=label2id)
     state_dict = torch.load(path.joinpath("state_dict.pt"))
     model.load_state_dict(state_dict)
     model.eval()

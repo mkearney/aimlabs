@@ -62,11 +62,17 @@ class Model(nn.Module):
         - `hyperparameters` HyperParameters used to initialize the model.
     """
 
-    def __init__(self, hyperparameters: HyperParameters):
+    def __init__(
+        self,
+        hyperparameters: HyperParameters,
+        label2id: Optional[Dict[str, int]] = None,
+    ):
         super(Model, self).__init__()
         # model settings
         self.hyperparameters = hyperparameters
         self._hp = self.hyperparameters
+        self.label2id = label2id or {str(i): i for i in range(self._hp.num_classes)}
+        self.id2label = {v: k for k, v in self.label2id.items()}
         self.version = datetime.now().strftime(f"{self._hp.version}.%Y%m%d%H%M%S")
         self.logger = get_logger(self.__class__.__name__)
         self.loss_fn = nn.CrossEntropyLoss()
