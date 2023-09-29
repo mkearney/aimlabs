@@ -7,7 +7,7 @@ def evaluate(
     dataloader,
     criterion,
     train_loss: float,
-    max_steps: bool = True,
+    max_steps: int,
 ):
     """
     Epoch evaluation for model training
@@ -22,7 +22,7 @@ def evaluate(
         - `metrics`: dict of metrics
     """
     losses, accs, f1s, prs, rcs = [], [], [], [], []
-    imax = model.hyperparameters.num_steps if max_steps else len(dataloader)
+    imax = max_steps if max_steps > 0 else len(dataloader)
     fit = Fit(num_classes=model.hyperparameters.num_classes)
     model.eval()  # type: ignore
     with torch.no_grad():

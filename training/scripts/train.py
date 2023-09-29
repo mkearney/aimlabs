@@ -37,7 +37,6 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--gamma", type=float)
     parser.add_argument("--hard-freeze", action=BooleanOptionalAction)
     parser.add_argument("--init-std", type=float)
-    parser.add_argument("--limit-test-steps", action=BooleanOptionalAction)
     parser.add_argument("--lr-patience", type=int)
     parser.add_argument("--lr", type=float)
     parser.add_argument("--max-len", type=int)
@@ -48,6 +47,10 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--num-hidden", type=int)
     parser.add_argument("--num-steps", type=int)
     parser.add_argument("--save", action=BooleanOptionalAction)
+    parser.add_argument("--test-batch-size", type=int)
+    parser.add_argument("--test-max-steps", type=int)
+    parser.add_argument("--valid-batch-size", type=int)
+    parser.add_argument("--valid-max-steps", type=int)
     parser.add_argument("--version", type=str)
     return parser
 
@@ -119,15 +122,15 @@ def main(args: Namespace):
         labels=test_labels,
     )
     train_dataloader = DataLoader(train_data, batch_size=hp.batch_size, shuffle=True)
-    valid_dataloader = DataLoader(valid_data, batch_size=hp.batch_size, shuffle=True)
-    test_batch_size = hp.batch_size if hp.max_len >= 42 else hp.batch_size * 4
+    valid_dataloader = DataLoader(
+        valid_data, batch_size=hp.valid_batch_size, shuffle=True
+    )
     test_dataloader = DataLoader(
         test_data,
-        batch_size=test_batch_size,
+        batch_size=hp.test_batch_size,
         shuffle=False,
         drop_last=False,
     )
-    # fit = Fit(num_classes=hp.num_classes)
 
     # train objects
     output_dir = Path("/Users/mwk/models/").joinpath(hp.name)
@@ -175,6 +178,7 @@ def main(args: Namespace):
                 dataloader=valid_dataloader,
                 criterion=criterion,
                 train_loss=trn_epoch_loss_stat,
+                max_steps=hp.valid_max_steps,
             )
             metrics.append(epoch=epoch, metrics=epoch_metrics)
             log_metrics(epoch, epoch_lr, epoch_metrics, logger)
@@ -223,7 +227,7 @@ def main(args: Namespace):
             dataloader=test_dataloader,
             criterion=criterion,
             train_loss=0.0,
-            max_steps=hp.limit_test_steps,
+            max_steps=hp.test_max_steps,
         )
         metrics.append(epoch=best_metric.epoch, metrics=epoch_metrics)
         log_test_metrics(epoch_metrics, logger)

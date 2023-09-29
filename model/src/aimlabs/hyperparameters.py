@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class HyperParameters(BaseModel):
@@ -15,7 +15,6 @@ class HyperParameters(BaseModel):
         - `gamma`: discount factor
         - `hard_freeze`: whether to hard freeze layers
         - `init_std`: variance of initialization
-        - `limit_test_steps`: whether to apply num_steps to test set
         - `lr_patience`: patience for learning rate scheduler
         - `lr`: learning rate
         - `max_len`: maximum length of a sequence
@@ -26,6 +25,8 @@ class HyperParameters(BaseModel):
         - `num_hidden`: number of trainable hidden dimensions
         - `num_steps`: number of steps
         - `save`: whether to save model
+        - `test_max_steps`: max number of test iterations to complete.
+        - `valid_max_steps`: max number of valid iterations to complete
         - `version`: model version
     """
 
@@ -38,7 +39,6 @@ class HyperParameters(BaseModel):
     gamma: float = 0.8
     hard_freeze: bool = False
     init_std: float = 0.015
-    limit_test_steps: bool = False
     lr_patience: int = 0
     lr: float = 5e-5
     max_len: int = 32
@@ -46,7 +46,24 @@ class HyperParameters(BaseModel):
     name: str = "nlpmodel"
     num_classes: int = 2
     num_epochs: int = 32
-    num_hidden: int = 2304
+    num_hidden: int = 1536
     num_steps: int = 16
     save: bool = False
+    test_batch_size: int = -1
+    test_max_steps: int = -2
+    valid_batch_size: int = -1
+    valid_max_steps: int = -2
     version: str = "0.1.0"
+
+    @model_validator(mode="after")
+    @classmethod
+    def check_max_steps(cls, data):
+        if data.test_max_steps < -1:
+            data.test_max_steps = data.num_steps
+        if data.valid_max_steps < -1:
+            data.valid_max_steps = data.num_steps
+        if data.test_batch_size < 0:
+            data.test_batch_size = data.batch_size
+        if data.valid_batch_size < 0:
+            data.valid_batch_size = data.batch_size
+        return data
