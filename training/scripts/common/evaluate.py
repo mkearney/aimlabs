@@ -29,7 +29,7 @@ def evaluate(
         for i, data in enumerate(dataloader):
             outputs = model(**data)  # type: ignore
             loss = criterion(outputs, data["labels"].long())
-            losses.append(loss.item())
+            losses.append(loss)
             fit_metrics = fit(outputs, data["labels"])
             accs.append(fit_metrics.acc)
             f1s.append(fit_metrics.f1)
@@ -39,7 +39,7 @@ def evaluate(
                 break
         # calculate means
         denom = len(losses)
-        val_loss = sum(losses) / denom
+        val_loss = torch.stack(losses).mean()
         val_acc = sum(accs) / denom
         val_f1 = sum(f1s) / denom
         val_pr = sum(prs) / denom

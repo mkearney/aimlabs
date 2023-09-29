@@ -15,6 +15,7 @@ class ModelSaver:
     ### Args:
         - `path` (str): Path to save the model.
         - `version` (str): Version of the model.
+        - `logger` (structlog.BoundLogger): Structlog logger.
     """
 
     def __init__(self, path: str, version: str, logger: structlog.BoundLogger):

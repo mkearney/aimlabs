@@ -47,7 +47,7 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--num-epochs", type=int)
     parser.add_argument("--num-hidden", type=int)
     parser.add_argument("--num-steps", type=int)
-    parser.add_argument("--save-model", action=BooleanOptionalAction)
+    parser.add_argument("--save", action=BooleanOptionalAction)
     parser.add_argument("--version", type=str)
     return parser
 
@@ -120,7 +120,7 @@ def main(args: Namespace):
     )
     train_dataloader = DataLoader(train_data, batch_size=hp.batch_size, shuffle=True)
     valid_dataloader = DataLoader(valid_data, batch_size=hp.batch_size, shuffle=True)
-    test_batch_size = hp.batch_size if hp.max_len >= 42 else hp.batch_size * 2
+    test_batch_size = hp.batch_size if hp.max_len >= 42 else hp.batch_size * 4
     test_dataloader = DataLoader(
         test_data,
         batch_size=test_batch_size,

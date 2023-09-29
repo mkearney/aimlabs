@@ -117,8 +117,8 @@ class Model(nn.Module):
     def init_weights(self):
         if self.inner_dims > 0:
             for module in self.outer_layer:  # type: ignore
-                for name, param in module.named_parameters():
-                    if "linear" in name:
+                if isinstance(module, nn.Linear):
+                    for param in module.parameters():
                         if param.dim() > 1:
                             param.data.normal_(mean=0.0, std=self._hp.init_std)
                         else:
