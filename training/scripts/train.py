@@ -28,6 +28,7 @@ def get_parser() -> ArgumentParser:
     parser = ArgumentParser()
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--best-metric", type=str)
+    parser.add_argument("--data-dir", type=str, default="/Users/mwk/data/imdb")
     parser.add_argument("--dropout", type=float)
     parser.add_argument("--early-stopping-patience", type=int)
     parser.add_argument("--eps", type=float)
@@ -36,15 +37,15 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--gamma", type=float)
     parser.add_argument("--hard-freeze", action=BooleanOptionalAction)
     parser.add_argument("--init-std", type=float)
+    parser.add_argument("--limit-test-steps", action=BooleanOptionalAction)
     parser.add_argument("--lr-patience", type=int)
     parser.add_argument("--lr", type=float)
-    parser.add_argument("--data-dir", type=str, default="/Users/mwk/data/imdb")
     parser.add_argument("--max-len", type=int)
     parser.add_argument("--model", type=str)
     parser.add_argument("--name", type=str)
     parser.add_argument("--num-classes", type=int)
-    parser.add_argument("--num-hidden", type=int)
     parser.add_argument("--num-epochs", type=int)
+    parser.add_argument("--num-hidden", type=int)
     parser.add_argument("--num-steps", type=int)
     parser.add_argument("--save-model", action=BooleanOptionalAction)
     parser.add_argument("--version", type=str)
@@ -119,9 +120,10 @@ def main(args: Namespace):
     )
     train_dataloader = DataLoader(train_data, batch_size=hp.batch_size, shuffle=True)
     valid_dataloader = DataLoader(valid_data, batch_size=hp.batch_size, shuffle=True)
+    test_batch_size = hp.batch_size if hp.max_len >= 42 else hp.batch_size * 2
     test_dataloader = DataLoader(
         test_data,
-        batch_size=max(hp.batch_size, 128),
+        batch_size=test_batch_size,
         shuffle=False,
         drop_last=False,
     )
@@ -162,10 +164,10 @@ def main(args: Namespace):
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
-                trn_epoch_loss.append(loss.item())
+                trn_epoch_loss.append(loss)
                 if i == hp.num_steps:
                     break
-            trn_epoch_loss_stat = sum(trn_epoch_loss) / len(trn_epoch_loss)
+            trn_epoch_loss_stat = torch.stack(trn_epoch_loss).mean().item()
 
             # validation steps
             epoch_metrics = evaluate(
@@ -192,7 +194,9 @@ def main(args: Namespace):
     end_time = datetime.now()
     logger.info("_end__", time=end_time.strftime("%Y-%m-%d %H:%M:%S"))
     duration = end_time - start_time
-    if duration.total_seconds() <= 120:
+    if duration.total_seconds() > 3600:
+        logger.info("_dur__", hours=f"{duration.total_seconds()/3600:,.2f}")
+    elif duration.total_seconds() <= 120:
         logger.info("_dur__", seconds=f"{duration.total_seconds():,.2f}")
     else:
         logger.info("_dur__", minutes=f"{duration.total_seconds()/60:,.2f}")
