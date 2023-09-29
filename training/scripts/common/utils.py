@@ -113,3 +113,15 @@ def log_metrics(epoch: int, epoch_lr: float, metrics: Dict[str, float], logger) 
     epp = f"{epoch:2d}"
     epp = f"{epp:^6}".replace(" ", "_")
     logger.info(f"{epp}", __lr=f"{epoch_lr:.5f}", **epoch_metrics_logging)
+
+
+def log_test_metrics(metrics: Dict[str, float], logger) -> None:
+    epoch_metrics_logging = {
+        "_tst": metrics["val_loss"],
+        "acc": metrics["val_acc"],
+        "f1": metrics["val_f1"],
+        "pr": metrics["val_pr"],
+        "rc": metrics["val_rc"],
+    }
+    epoch_metrics_logging = {k: f"{v:.4f}" for k, v in epoch_metrics_logging.items()}
+    logger.info("_test_", **epoch_metrics_logging)

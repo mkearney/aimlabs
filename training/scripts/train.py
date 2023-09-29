@@ -9,10 +9,11 @@ import torch.optim as optim
 from aimlabs.save import ModelSaver
 from aimlabs.utils import get_logger
 from common.evaluate import evaluate
-from common.metrics import BestMetric, Fit, Metrics
+from common.metrics import BestMetric, Metrics
 from common.utils import (
     get_hyperparameters_from_args,
     log_metrics,
+    log_test_metrics,
     model_size,
     save_hypers,
 )
@@ -120,11 +121,11 @@ def main(args: Namespace):
     valid_dataloader = DataLoader(valid_data, batch_size=hp.batch_size, shuffle=True)
     test_dataloader = DataLoader(
         test_data,
-        batch_size=hp.batch_size,
+        batch_size=max(hp.batch_size, 128),
         shuffle=False,
-        drop_last=True,
+        drop_last=False,
     )
-    fit = Fit(num_classes=hp.num_classes)
+    # fit = Fit(num_classes=hp.num_classes)
 
     # train objects
     output_dir = Path("/Users/mwk/models/").joinpath(hp.name)
@@ -213,31 +214,15 @@ def main(args: Namespace):
 
     # test set
     try:
-        with torch.no_grad():
-            test_loss, acc, f1s, prs, rcs = [], [], [], [], []
-            for i, data in enumerate(test_dataloader):
-                outputs = model(**data)  # type: ignore
-                loss = criterion(outputs, data["labels"].long())
-                fit_metrics = fit(outputs, data["labels"])
-                acc.append(fit_metrics.acc)
-                f1s.append(fit_metrics.f1)
-                prs.append(fit_metrics.pr)
-                rcs.append(fit_metrics.rc)
-                test_loss.append(loss.item())
-            denom = len(acc)
-            tacc = sum(acc) / denom
-            tf1 = sum(f1s) / denom
-            tlss = sum(test_loss) / denom
-            tpr = sum(prs) / denom
-            trc = sum(rcs) / denom
-            logger.info(
-                "_test_",
-                loss=f"{tlss:.4f}",
-                acc=f"{tacc:.4f}",
-                f1=f"{tf1:.4f}",
-                pr=f"{tpr:.4f}",
-                rc=f"{trc:.4f}",
-            )
+        epoch_metrics = evaluate(
+            model=model,
+            dataloader=test_dataloader,
+            criterion=criterion,
+            train_loss=0.0,
+            max_steps=hp.limit_test_steps,
+        )
+        metrics.append(epoch=best_metric.epoch, metrics=epoch_metrics)
+        log_test_metrics(epoch_metrics, logger)
     except KeyboardInterrupt:
         logger.info("__keyboard_interrupt__")
 
