@@ -26,26 +26,29 @@ on the task of sentiment classification using the IMDB reviews dataset.
 ```bash
 .venv/bin/python ./scripts/train.py \
     --data-dir /Users/mwk/data/imdb \
-    --batch-size 32 \
+    --batch-size 16 \
     --best-metric val_loss \
-    --dropout 0.3 \
+    --dropout 0.15 \
     --early_stopping_patience 6 \
-    --eps 1e-9 \
+    --eps 1e-10 \
     --no-freeze \
-    --init-std 0.02 \
+    --init-std 0.015 \
     --lr 5e-5 \
-    --max-len 128 \
+    --max-len 512 \
     --model distilbert-base-uncased \
     --name imdbsentiment \
     --num-classes 2 \
     --num-epochs 32 \
-    --num-hidden 200 \
-    --num-steps 32
+    --num-hidden 768 \
+    --num-steps 128 \
+    --save \
+    --test-max-steps 9999
 ```
 
 ## Models
 
-There are a variety of models that can be fine tuned.
+There are a variety of models that can be fine tuned. Here are some
+examples along with their bare bone parameters and sizes.
 
 | pretrained_model                          |   parameters |   size_mb |
 |-------------------------------------------|-------------:|----------:|
