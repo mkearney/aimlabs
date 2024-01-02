@@ -1,13 +1,11 @@
-BIN = .venv/bin
-PIP = $(BIN)/pip
+BIN = .venv/Scripts
+PIP = $(BIN)/pip.exe
+PYTHON = $(BIN)/python.exe
 PYTEST = $(BIN)/pytest
 
 .PHONY: develop
 develop:
-	rm -rf .venv
 	python -m venv .venv
-	$(PIP) install -U pip
-	$(PIP) install wheel
 	$(PIP) install \
 		-e ../model/. \
 		-r requirements/dev.txt
