@@ -10,25 +10,30 @@ from aimlabs.model import Model
 
 
 class Prediction(BaseModel):
+    text: str
     label: str
     proba: List[float]
 
 
 class Predictions:
-    def __init__(self, messages: List[str], predictions: List[Prediction]):
-        self.messages = messages
+    def __init__(self, predictions: List[Prediction]):
         self.predictions = predictions
-        self.labels = [prediction.label for prediction in predictions]
-        self.proba = [prediction.proba for prediction in predictions]
 
     def __dict__(self):
-        return {"message": self.messages, "label": self.labels, "proba": self.proba}
+        return {
+            "text": [prediction.text for prediction in self.predictions],
+            "label": [prediction.label for prediction in self.predictions],
+            "proba": [prediction.proba for prediction in self.predictions],
+        }
 
     def __str__(self):
         return str(self.__dict__())
 
     def __repr__(self):
         return self.__str__()
+
+    def __iter__(self):
+        return iter(self.predictions)
 
 
 class Predictor:
@@ -58,17 +63,16 @@ class Predictor:
         msgs: List[str],
         bs: int,
     ) -> Predictions:
-        batches = self.batch(msgs, bs)
-        probas = torch.stack(
-            [row for b in batches for row in self.model(**self.model.preprocess(b))]
-        )
+        batches = [
+            self.model(**self.model.preprocess(b)) for b in self.batch(msgs, bs)
+        ]
+        probas = torch.stack([row for batch in batches for row in batch])
         probas = torch.softmax(probas, 1)
         labels = [self.model.id2label[i] for i in probas.argmax(1).tolist()]
         return Predictions(
-            messages=msgs,
             predictions=[
-                Prediction(label=label, proba=proba.tolist())
-                for label, proba in zip(labels, probas)
+                Prediction(text=text, label=label, proba=proba)
+                for text, label, proba in zip(msgs, labels, probas.tolist())
             ],
         )
 

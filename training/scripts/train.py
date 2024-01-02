@@ -15,7 +15,6 @@ from common.utils import (
     log_metrics,
     log_test_metrics,
     model_size,
-    save_hypers,
 )
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
@@ -28,10 +27,16 @@ def get_parser() -> ArgumentParser:
     parser = ArgumentParser()
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--best-metric", type=str)
-    parser.add_argument("--data-dir", type=str, default="/Users/mwk/data/imdb")
+    parser.add_argument(
+        "--input-dir",
+        type=str,
+        default=r"C:\Users\3239550\data\meijer-sentiment",
+    )
     parser.add_argument("--dropout", type=float)
     parser.add_argument("--early-stopping-patience", type=int)
     parser.add_argument("--eps", type=float)
+    # setting this to below 1.0 to train on only a fraction of the data
+    # (useful for testing and development)
     parser.add_argument("--fraction", type=float, default=1.0)
     parser.add_argument("--freeze", action=BooleanOptionalAction)
     parser.add_argument("--gamma", type=float)
@@ -46,6 +51,9 @@ def get_parser() -> ArgumentParser:
     parser.add_argument("--num-epochs", type=int)
     parser.add_argument("--num-hidden", type=int)
     parser.add_argument("--num-steps", type=int)
+    parser.add_argument(
+        "--output-dir", type=str, default=r"C:\Users\3239550\models"
+    )
     parser.add_argument("--save", action=BooleanOptionalAction)
     parser.add_argument("--test-batch-size", type=int)
     parser.add_argument("--test-max-steps", type=int)
@@ -69,17 +77,20 @@ def main(args: Namespace):
     start_time = datetime.now()
     logger.info("_init_", time=start_time.strftime("%Y-%m-%d %H:%M:%S"))
 
-    data_dir = Path(args.data_dir)
-    train_df = pl.read_parquet(data_dir.joinpath("train.parquet"))
-    valid_df = pl.read_parquet(data_dir.joinpath("valid.parquet"))
-    test_df = pl.read_parquet(data_dir.joinpath("test.parquet"))
+    input_dir = Path(args.input_dir)
+    train_df = pl.read_parquet(input_dir.joinpath("train.parquet"))
+    valid_df = pl.read_parquet(input_dir.joinpath("valid.parquet"))
+    test_df = pl.read_parquet(input_dir.joinpath("test.parquet"))
     label2id = {
-        label: idx for idx, label in enumerate(train_df["label"].unique().sort())
+        label: idx
+        for idx, label in enumerate(train_df["label"].unique().sort())
     }
 
     if args.fraction < 1.0:
         train_df = train_df.sample(fraction=args.fraction, shuffle=True)
-        valid_df = valid_df.sample(fraction=(args.fraction + 1) / 2, shuffle=True)
+        valid_df = valid_df.sample(
+            fraction=(args.fraction + 1) / 2, shuffle=True
+        )
         test_df = test_df.sample(fraction=(args.fraction + 1) / 2, shuffle=True)
 
     # data sizes, hypers, and training components
@@ -91,7 +102,7 @@ def main(args: Namespace):
     for k, v in hp.__dict__.items():
         logger.info("__hp__", **{k: v})
 
-    model = Model(hyperparameters=hp)
+    model = Model(hyperparameters=hp, label2id=label2id)
     logger.info("_size_", **model_size(model))
 
     train_inputs = model.preprocess(train_df["text"].to_list())
@@ -121,7 +132,9 @@ def main(args: Namespace):
         attention_mask=test_inputs["attention_mask"],  # type: ignore
         labels=test_labels,
     )
-    train_dataloader = DataLoader(train_data, batch_size=hp.batch_size, shuffle=True)
+    train_dataloader = DataLoader(
+        train_data, batch_size=hp.batch_size, shuffle=True
+    )
     valid_dataloader = DataLoader(
         valid_data, batch_size=hp.valid_batch_size, shuffle=True
     )
@@ -133,7 +146,7 @@ def main(args: Namespace):
     )
 
     # train objects
-    output_dir = Path("/Users/mwk/models/").joinpath(hp.name)
+    output_dir = Path(args.output_dir).joinpath(hp.name)
     output_dir.mkdir(parents=True, exist_ok=True)
     saver = ModelSaver(
         str(output_dir), version=model.version, logger=logger
@@ -188,7 +201,8 @@ def main(args: Namespace):
             lr_scheduler.step(epoch_metrics[best_metric.metric])
             if best_metric.early_stop_counter >= hp.early_stopping_patience:
                 logger.info(
-                    "_stop_", early_stopping_counter=best_metric.early_stop_counter
+                    "_stop_",
+                    early_stopping_counter=best_metric.early_stop_counter,
                 )
                 break
     except KeyboardInterrupt:
@@ -233,16 +247,6 @@ def main(args: Namespace):
         log_test_metrics(epoch_metrics, logger)
     except KeyboardInterrupt:
         logger.info("__keyboard_interrupt__")
-
-    # save metadata
-    saved_as = metrics.save("/Users/mwk/models/meta", model.version)
-    hyperparameters_path = save_hypers(
-        params=model.hyperparameters.__dict__,
-        output_dir="/Users/mwk/models/meta",
-        version=model.version,  # type: ignore
-    )
-    logger.info("_meta_", hyperparameters=hyperparameters_path)
-    logger.info("_meta_", metrics=saved_as)
 
 
 if __name__ == "__main__":

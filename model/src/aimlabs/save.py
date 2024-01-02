@@ -31,7 +31,9 @@ class ModelSaver:
         self.logger.info("_save_", state_dict=path)
 
     def save_hyperparameters(self, model: Model) -> None:
-        with open(path := str(self.path.joinpath("hyperparameters.json")), "w") as f:
+        with open(
+            path := str(self.path.joinpath("hyperparameters.json")), "w"
+        ) as f:
             json.dump(model.hyperparameters.__dict__, f)
         self.logger.info("_save_", hyperparameters=path)
 
@@ -40,7 +42,7 @@ class ModelSaver:
             json.dump(model.model.config.__dict__, f)
         self.logger.info("_save_", config=path)
 
-    def label2id(self, model: Model) -> None:
+    def save_label2id(self, model: Model) -> None:
         with open(path := str(self.path.joinpath("label2id.json")), "w") as f:
             json.dump(model.label2id, f)
         self.logger.info("_save_", label2id=path)
@@ -56,6 +58,7 @@ class ModelSaver:
             self.save_hyperparameters(model)
             self.save_config(model)
             self.save_metrics(metrics)
+            self.save_label2id(model)
         else:
             self.logger.info(
                 "nosave", state_dict=None, hyperparameters=None, metrics=None
