@@ -1,18 +1,52 @@
-# A.I. Message Labels
+# aimlabs
 
-Packaging for deep learning text classification models
+Fine-tune and serve transformer-based text classification models.
 
-## aimlabs
+`aimlabs` wraps a pretrained Hugging Face sequence classifier (BERT,
+DistilBERT, RoBERTa, …) with an optional trainable hidden layer, plus helpers
+for preprocessing, saving, and inference.
 
-A python package managed via poetry. The purpose of `aimlabs` is to
-provide an interface for specifying and training text classification
-models, primarily those that are fine-tuned from preexisting models
-like BERT or distilbert.
+## Installation
+
+```bash
+pip install aimlabs
+```
+
+## Usage
+
+```python
+from aimlabs import HyperParameters, Model, ModelSaver, Predictor
+
+hp = HyperParameters(model="distilbert-base-uncased", num_classes=2, save=True)
+model = Model(hp, label2id={"neg": 0, "pos": 1})
+
+# ... train (see the training/ pipelines in the repository) ...
+
+saver = ModelSaver("models/sentiment", version=model.version)
+saver.save(model, metrics={})
+
+predictor = Predictor(saver.path)
+predictor.predict("what a great film").to_dict()
+```
+
+A saved model directory contains `state_dict.pt`, `hyperparameters.json`,
+`label2id.json`, `config.json`, and `metrics.json`. Weights are loaded with
+`torch.load(..., weights_only=True)`.
+
+## Architecture
+
+- `num_hidden > 0` (default): the pretrained model's classification head
+  projects to its hidden width, followed by dropout → linear(`num_hidden`) →
+  batch norm → linear(`num_classes`).
+- `num_hidden = 0`: the pretrained classification head outputs `num_classes`
+  logits directly, with `dropout` applied as the head's dropout.
+- `freeze=True` freezes the pretrained base model; `hard_freeze=True` freezes
+  every pretrained parameter, leaving only the outer layers trainable.
 
 ## Models
 
-There are a variety of models that can be fine tuned. Here are some
-examples along with their bare bone parameters and sizes.
+Any Hugging Face sequence-classification checkpoint should work. Some
+examples with their parameter counts and sizes:
 
 | pretrained_model                          |   parameters |   size_mb |
 |-------------------------------------------|-------------:|----------:|

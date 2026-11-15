@@ -1,169 +1,187 @@
-from argparse import ArgumentParser, BooleanOptionalAction, Namespace
+"""
+Fine-tune an `aimlabs.Model` on a text classification dataset.
+
+The input directory must contain `train`, `valid`, and `test` splits as
+`.parquet`, `.csv`, or `.jsonl` files, each with `text` and `label` columns.
+
+Run `python scripts/train.py --help` for all options.
+"""
+
+from __future__ import annotations
+
+from argparse import (
+    ArgumentParser,
+    BooleanOptionalAction,
+    Namespace,
+    RawDescriptionHelpFormatter,
+)
 from datetime import datetime
 from pathlib import Path
 
 import polars as pl
 import torch
 import torch.nn as nn
-import torch.optim as optim
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
+
+from aimlabs.data import InputsDataset
+from aimlabs.hyperparameters import HyperParameters
+from aimlabs.model import Model
 from aimlabs.save import ModelSaver
-from aimlabs.utils import get_logger
-from common.evaluate import evaluate
+from aimlabs.utils import get_device, get_logger, seed_everything
+from common.evaluate import evaluate, move_to
 from common.metrics import BestMetric, Metrics
 from common.utils import (
+    format_duration,
     get_hyperparameters_from_args,
     log_metrics,
     log_test_metrics,
     model_size,
 )
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
 
-from aimlabs.data import InputsDataset
-from aimlabs.model import Model
+SPLITS = ("train", "valid", "test")
+READERS = {".parquet": pl.read_parquet, ".csv": pl.read_csv, ".jsonl": pl.read_ndjson}
 
 
 def get_parser() -> ArgumentParser:
-    parser = ArgumentParser()
-    parser.add_argument("--batch-size", type=int)
-    parser.add_argument("--best-metric", type=str)
-    parser.add_argument(
+    parser = ArgumentParser(
+        description=__doc__, formatter_class=RawDescriptionHelpFormatter
+    )
+    io = parser.add_argument_group("data and output")
+    io.add_argument(
         "--input-dir",
-        type=str,
-        default=r"C:\Users\3239550\data\meijer-sentiment",
+        "--data-dir",
+        type=Path,
+        required=True,
+        help="directory containing train/valid/test splits",
     )
-    parser.add_argument("--dropout", type=float)
-    parser.add_argument("--early-stopping-patience", type=int)
-    parser.add_argument("--eps", type=float)
-    # setting this to below 1.0 to train on only a fraction of the data
-    # (useful for testing and development)
-    parser.add_argument("--fraction", type=float, default=1.0)
-    parser.add_argument("--freeze", action=BooleanOptionalAction)
-    parser.add_argument("--gamma", type=float)
-    parser.add_argument("--hard-freeze", action=BooleanOptionalAction)
-    parser.add_argument("--init-std", type=float)
-    parser.add_argument("--lr-patience", type=int)
-    parser.add_argument("--lr", type=float)
-    parser.add_argument("--max-len", type=int)
-    parser.add_argument("--model", type=str)
-    parser.add_argument("--name", type=str)
-    parser.add_argument("--num-classes", type=int)
-    parser.add_argument("--num-epochs", type=int)
-    parser.add_argument("--num-hidden", type=int)
-    parser.add_argument("--num-steps", type=int)
-    parser.add_argument(
-        "--output-dir", type=str, default=r"C:\Users\3239550\models"
+    io.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("models"),
+        help="models are saved to <output-dir>/<name>/<version> (default: models)",
     )
-    parser.add_argument("--save", action=BooleanOptionalAction)
-    parser.add_argument("--test-batch-size", type=int)
-    parser.add_argument("--test-max-steps", type=int)
-    parser.add_argument("--valid-batch-size", type=int)
-    parser.add_argument("--valid-max-steps", type=int)
-    parser.add_argument("--version", type=str)
+    io.add_argument(
+        "--fraction",
+        type=float,
+        default=1.0,
+        help="train on a random fraction of the data (useful for development)",
+    )
+    io.add_argument("--device", type=str, help="torch device (default: auto-detect)")
+
+    # Hyperparameters: unset flags fall back to `HyperParameters` defaults.
+    hp = parser.add_argument_group("hyperparameters")
+    for name, field in HyperParameters.model_fields.items():
+        flag = f"--{name.replace('_', '-')}"
+        help_ = f"(default: {field.default})"
+        if field.annotation is bool:
+            hp.add_argument(flag, action=BooleanOptionalAction, help=help_)
+        else:
+            kind = {int: int, float: float, int | None: int}.get(field.annotation, str)
+            hp.add_argument(flag, type=kind, help=help_)
     return parser
 
 
-def parse_args() -> Namespace:
-    parser = get_parser()
-    return parser.parse_args()
+def parse_args(argv: list[str] | None = None) -> Namespace:
+    return get_parser().parse_args(argv)
 
 
-# intractive dev
-# args = get_parser().parse_args([])
+def read_split(input_dir: Path, split: str) -> pl.DataFrame:
+    for suffix, reader in READERS.items():
+        path = input_dir / f"{split}{suffix}"
+        if path.is_file():
+            df = reader(path)
+            missing = {"text", "label"} - set(df.columns)
+            if missing:
+                raise ValueError(f"{path} is missing column(s): {sorted(missing)}")
+            return df.select(
+                pl.col("text").cast(pl.Utf8), pl.col("label").cast(pl.Utf8)
+            )
+    raise FileNotFoundError(
+        f"no {split} split found in {input_dir} (looked for {split}"
+        f"{{{','.join(READERS)}}})"
+    )
 
 
-def main(args: Namespace):
-    logger = get_logger(args.version, args.name)
+def make_dataset(
+    model: Model, df: pl.DataFrame, label2id: dict[str, int]
+) -> InputsDataset:
+    unknown = set(df["label"].unique().to_list()) - set(label2id)
+    if unknown:
+        raise ValueError(f"labels not present in the training split: {unknown}")
+    inputs = model.preprocess(df["text"].to_list())
+    labels = torch.tensor([label2id[x] for x in df["label"].to_list()])
+    return InputsDataset(inputs["input_ids"], inputs["attention_mask"], labels)
+
+
+def main(args: Namespace) -> None:
+    hp = get_hyperparameters_from_args(args)
+    logger = get_logger(hp.name, version=hp.version)
     start_time = datetime.now()
     logger.info("_init_", time=start_time.strftime("%Y-%m-%d %H:%M:%S"))
+    if hp.seed is not None:
+        seed_everything(hp.seed)
+    device = get_device(args.device)
+    logger.info("device", device=str(device))
 
-    input_dir = Path(args.input_dir)
-    train_df = pl.read_parquet(input_dir.joinpath("train.parquet"))
-    valid_df = pl.read_parquet(input_dir.joinpath("valid.parquet"))
-    test_df = pl.read_parquet(input_dir.joinpath("test.parquet"))
-    label2id = {
-        label: idx
-        for idx, label in enumerate(train_df["label"].unique().sort())
-    }
+    # data
+    train_df, valid_df, test_df = (read_split(args.input_dir, s) for s in SPLITS)
+    labels = sorted(train_df["label"].unique().to_list())
+    label2id = {label: idx for idx, label in enumerate(labels)}
+    if len(label2id) != hp.num_classes:
+        logger.warning(
+            "num_classes does not match the training labels; using the latter",
+            num_classes=hp.num_classes,
+            labels=len(label2id),
+        )
+        hp = hp.model_copy(update={"num_classes": len(label2id)})
 
     if args.fraction < 1.0:
-        train_df = train_df.sample(fraction=args.fraction, shuffle=True)
-        valid_df = valid_df.sample(
-            fraction=(args.fraction + 1) / 2, shuffle=True
-        )
-        test_df = test_df.sample(fraction=(args.fraction + 1) / 2, shuffle=True)
+        train_df = train_df.sample(fraction=args.fraction, shuffle=True, seed=hp.seed)
+        eval_fraction = (args.fraction + 1) / 2
+        valid_df = valid_df.sample(fraction=eval_fraction, shuffle=True, seed=hp.seed)
+        test_df = test_df.sample(fraction=eval_fraction, shuffle=True, seed=hp.seed)
 
-    # data sizes, hypers, and training components
-    logger.info("_nobs_", train=train_df.shape[0])
-    logger.info("_nobs_", valid=valid_df.shape[0])
-    logger.info("_nobs_", test=test_df.shape[0])
-
-    hp = get_hyperparameters_from_args(args)
-    for k, v in hp.__dict__.items():
+    logger.info("_nobs_", train=len(train_df), valid=len(valid_df), test=len(test_df))
+    for k, v in hp.model_dump().items():
         logger.info("__hp__", **{k: v})
 
     model = Model(hyperparameters=hp, label2id=label2id)
     logger.info("_size_", **model_size(model))
+    model.to(device)
 
-    train_inputs = model.preprocess(train_df["text"].to_list())
-    valid_inputs = model.preprocess(valid_df["text"].to_list())
-    test_inputs = model.preprocess(test_df["text"].to_list())
-    train_labels = torch.tensor(
-        train_df["label"].map_dict(label2id).to_list(), dtype=torch.int64
-    )
-    valid_labels = torch.tensor(
-        valid_df["label"].map_dict(label2id).to_list(), dtype=torch.int64
-    )
-    test_labels = torch.tensor(
-        test_df["label"].map_dict(label2id).to_list(), dtype=torch.int64
-    )
-    train_data = InputsDataset(
-        input_ids=train_inputs["input_ids"],  # type: ignore
-        attention_mask=train_inputs["attention_mask"],  # type: ignore
-        labels=train_labels,
-    )
-    valid_data = InputsDataset(
-        input_ids=valid_inputs["input_ids"],  # type: ignore
-        attention_mask=valid_inputs["attention_mask"],  # type: ignore
-        labels=valid_labels,
-    )
-    test_data = InputsDataset(
-        input_ids=test_inputs["input_ids"],  # type: ignore
-        attention_mask=test_inputs["attention_mask"],  # type: ignore
-        labels=test_labels,
-    )
+    pin = device.type == "cuda"
     train_dataloader = DataLoader(
-        train_data, batch_size=hp.batch_size, shuffle=True
+        make_dataset(model, train_df, label2id),
+        batch_size=hp.batch_size,
+        shuffle=True,
+        pin_memory=pin,
+        # BatchNorm in the outer layer can't handle a trailing batch of one
+        drop_last=hp.num_hidden > 0,
     )
     valid_dataloader = DataLoader(
-        valid_data, batch_size=hp.valid_batch_size, shuffle=True
+        make_dataset(model, valid_df, label2id),
+        batch_size=hp.valid_batch_size,
+        shuffle=True,
+        pin_memory=pin,
     )
     test_dataloader = DataLoader(
-        test_data,
+        make_dataset(model, test_df, label2id),
         batch_size=hp.test_batch_size,
         shuffle=False,
-        drop_last=False,
+        pin_memory=pin,
     )
 
-    # train objects
-    output_dir = Path(args.output_dir).joinpath(hp.name)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    saver = ModelSaver(
-        str(output_dir), version=model.version, logger=logger
-    )  # type: ignore
+    # training objects
+    saver = ModelSaver(args.output_dir / hp.name, version=model.version, logger=logger)
     metrics = Metrics()
     best_metric = BestMetric(metric=hp.best_metric)
-    optimizer = optim.AdamW(
-        model.parameters(),  # type: ignore
-        lr=hp.lr,
-        eps=hp.eps,
-    )  # type: ignore
+    optimizer = AdamW(
+        (p for p in model.parameters() if p.requires_grad), lr=hp.lr, eps=hp.eps
+    )
     lr_scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode=best_metric.mode,
-        factor=hp.gamma,
-        patience=hp.lr_patience,
-        verbose=False,
+        optimizer, mode=best_metric.mode, factor=hp.gamma, patience=hp.lr_patience
     )
     criterion = nn.CrossEntropyLoss()
 
@@ -171,55 +189,44 @@ def main(args: Namespace):
     try:
         for epoch in range(hp.num_epochs):
             epoch_lr = optimizer.param_groups[0]["lr"]
-
-            # training steps
-            trn_epoch_loss = []
-            model.train()  # type: ignore
-            for i, data in enumerate(train_dataloader):
-                loss = model.train_step(data)
+            model.train()
+            total_loss, steps = 0.0, 0
+            for batch in train_dataloader:
+                if 0 < hp.num_steps <= steps:
+                    break
+                loss = model.train_step(move_to(batch, device))
                 loss.backward()
                 optimizer.step()
-                optimizer.zero_grad()
-                trn_epoch_loss.append(loss)
-                if i == hp.num_steps:
-                    break
-            trn_epoch_loss_stat = torch.stack(trn_epoch_loss).mean().item()
+                optimizer.zero_grad(set_to_none=True)
+                total_loss += loss.item()
+                steps += 1
 
-            # validation steps
             epoch_metrics = evaluate(
                 model=model,
                 dataloader=valid_dataloader,
                 criterion=criterion,
-                train_loss=trn_epoch_loss_stat,
+                train_loss=total_loss / max(steps, 1),
                 max_steps=hp.valid_max_steps,
             )
             metrics.append(epoch=epoch, metrics=epoch_metrics)
             log_metrics(epoch, epoch_lr, epoch_metrics, logger)
 
-            # track best metric
             best_metric(epoch=epoch, metrics=epoch_metrics, model=model)
             lr_scheduler.step(epoch_metrics[best_metric.metric])
             if best_metric.early_stop_counter >= hp.early_stopping_patience:
-                logger.info(
-                    "_stop_",
-                    early_stopping_counter=best_metric.early_stop_counter,
-                )
+                logger.info("_stop_", early_stopping=best_metric.early_stop_counter)
                 break
     except KeyboardInterrupt:
         logger.info("__keyboard_interrupt__")
 
-    # training duration
     end_time = datetime.now()
     logger.info("_end__", time=end_time.strftime("%Y-%m-%d %H:%M:%S"))
-    duration = end_time - start_time
-    if duration.total_seconds() > 3600:
-        logger.info("_dur__", hours=f"{duration.total_seconds()/3600:,.2f}")
-    elif duration.total_seconds() <= 120:
-        logger.info("_dur__", seconds=f"{duration.total_seconds():,.2f}")
-    else:
-        logger.info("_dur__", minutes=f"{duration.total_seconds()/60:,.2f}")
+    logger.info("_dur__", **format_duration(end_time - start_time))
 
-    # best epoch logging
+    if not best_metric.state_dict:
+        logger.warning("no completed epochs; nothing to evaluate or save")
+        return
+
     logger.info(
         "_best_",
         _epoch=best_metric.epoch,
@@ -229,26 +236,32 @@ def main(args: Namespace):
         value=f"{best_metric.alt_value:.4f}",
     )
 
-    # save model
-    model.load_state_dict(best_metric.state_dict)  # type: ignore
-    model.eval()  # type: ignore
-    saver.save(model, metrics.__dict__)
-
-    # test set
+    # restore the best weights, evaluate on the test set, then save
+    model.load_state_dict(best_metric.state_dict)
+    model.eval()
     try:
-        epoch_metrics = evaluate(
+        test_metrics = evaluate(
             model=model,
             dataloader=test_dataloader,
             criterion=criterion,
-            train_loss=0.0,
+            train_loss=best_metric.trn_loss,
             max_steps=hp.test_max_steps,
         )
-        metrics.append(epoch=best_metric.epoch, metrics=epoch_metrics)
-        log_test_metrics(epoch_metrics, logger)
+        log_test_metrics(test_metrics, logger)
     except KeyboardInterrupt:
         logger.info("__keyboard_interrupt__")
+        test_metrics = None
+
+    model.to("cpu")
+    saver.save(
+        model,
+        {
+            **metrics.collect(),
+            "best_epoch": best_metric.epoch,
+            "test": test_metrics,
+        },
+    )
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    main(args)
+    main(parse_args())

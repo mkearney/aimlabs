@@ -1,53 +1,68 @@
-# A.I. Message Labels
+# Training pipelines
 
-Training pipelines for deep learning text classification models
+Training pipelines for `aimlabs` text classification models.
 
 ## Installation
 
-The following make command will install the required dependencies along with
-the `aimlabs` package, which is found in the base `model/` directory of this
-repository.
+From the repository root:
 
 ```bash
-make develop
+make develop        # or: uv sync --all-packages
 ```
 
-## Testing
+## Data
 
-```bash1
-make test
-```
+`--input-dir` must contain `train`, `valid`, and `test` splits, each as a
+`.parquet`, `.csv`, or `.jsonl` file with two columns:
+
+| column  | type   | description                     |
+|---------|--------|---------------------------------|
+| `text`  | string | the message to classify         |
+| `label` | string | the class label                 |
+
+Labels are taken from the training split; `--num-classes` is corrected
+automatically if it doesn't match.
 
 ## Usage
 
-Example of fine-tuning or transfer learning via `distilbert-base-uncased`
-on the task of sentiment classification using the IMDB reviews dataset.
+Fine-tune `distilbert-base-uncased` for sentiment classification on the IMDB
+reviews dataset:
 
 ```bash
-.venv/bin/python ./scripts/train.py \
-    --data-dir /Users/mwk/data/imdb \
+uv run python scripts/train.py \
+    --input-dir ~/data/imdb \
+    --output-dir models \
     --batch-size 16 \
     --best-metric val_loss \
     --dropout 0.15 \
-    --early_stopping_patience 6 \
-    --eps 1e-10 \
+    --early-stopping-patience 6 \
     --no-freeze \
-    --init-std 0.015 \
     --lr 5e-5 \
     --max-len 512 \
     --model distilbert-base-uncased \
     --name imdbsentiment \
-    --num-classes 2 \
     --num-epochs 32 \
     --num-hidden 768 \
     --num-steps 128 \
-    --save \
-    --test-max-steps 9999
+    --test-max-steps -1 \
+    --seed 42 \
+    --save
 ```
 
-A screenshot of the logging output from the example command above. This
-shows a successful replication of the IMDB classification benchmark
-(~93% accuracy) achieved by the distilbert-base-uncased model. (see
-paperswithcode for a full list of peer-reviewed benchmarks)
+Run `uv run python scripts/train.py --help` for every option; each
+hyperparameter flag maps to a field of `aimlabs.HyperParameters`. The device
+(CUDA → MPS → CPU) is detected automatically; override it with `--device`.
+
+The best epoch (by `--best-metric`) is restored, evaluated on the test split,
+and — with `--save` — written to `<output-dir>/<name>/<version>/`.
+
+Logging output from the example above, replicating the IMDB benchmark (~93%
+accuracy) for distilbert-base-uncased:
 
 ![](../tools/readme/training-screenshot.png)
+
+## Testing
+
+```bash
+make test
+```

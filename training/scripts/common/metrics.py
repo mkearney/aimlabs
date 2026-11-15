@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import json
-from typing import Dict, List, Union
+from pathlib import Path
 
+import torch
 from pydantic import BaseModel
-from torchmetrics import Accuracy, F1Score, Precision, Recall
+from torchmetrics import Accuracy, F1Score, MetricCollection, Precision, Recall
 
-from aimlabs.model import Model
+LOWER_IS_BETTER = frozenset({"loss", "val_loss"})
 
 
 class FitStatistics(BaseModel):
@@ -26,66 +29,58 @@ class FitStatistics(BaseModel):
 
 class Fit:
     """
-    A fit estimator class that when called returns FitStatistics object.
+    Streaming classification metrics. Call `update()` for every batch and
+    `compute()` once at the end, so metrics are computed over the whole
+    dataset rather than averaged across batches.
 
     ### Args
         - `num_classes`: number of classes
-        - `task`: task type
         - `average`: how to average the metrics, i.e., "micro" or "macro"
+        - `device`: device the predictions live on
 
     ### Examples
     ```python
     import torch
 
-    # set number of classes and initialize estimator
-    num_classes = 4
-    fit = Fit(num_classes=num_classes)
-
-    # create example tensors
-    output = torch.randn(8, num_classes)
-    labels = torch.randint(0, num_classes, (8,))
-
-    # apply estimator
-    fit(output, labels)
+    fit = Fit(num_classes=4)
+    fit.update(torch.randn(8, 4), torch.randint(0, 4, (8,)))
+    fit.compute()
+    ```
     """
 
     def __init__(
         self,
         num_classes: int,
-        task: str = "multiclass",
         average: str = "macro",
-    ):
-        self.num_classes = num_classes
-        self.average = average
-        self.task = task
-        self.accuracy = Accuracy(
-            task=self.task,  # type: ignore
-            num_classes=num_classes,
-            average=self.average,  # type: ignore
-        )
-        self.f1_score = F1Score(
-            task=self.task,  # type: ignore
-            num_classes=num_classes,
-            average=self.average,  # type: ignore
-        )
-        self.precision = Precision(
-            task=self.task,  # type: ignore
-            num_classes=num_classes,
-            average=self.average,  # type: ignore
-        )
-        self.recall = Recall(
-            task=self.task,  # type: ignore
-            num_classes=num_classes,
-            average=self.average,  # type: ignore
-        )
+        device: torch.device | str = "cpu",
+    ) -> None:
+        kwargs = {"task": "multiclass", "num_classes": num_classes, "average": average}
+        self.collection = MetricCollection(
+            {
+                "acc": Accuracy(**kwargs),
+                "f1": F1Score(**kwargs),
+                "pr": Precision(**kwargs),
+                "rc": Recall(**kwargs),
+            }
+        ).to(device)
 
-    def __call__(self, output, target) -> FitStatistics:
-        return FitStatistics(
-            acc=self.accuracy(output, target),
-            f1=self.f1_score(output, target),
-            pr=self.precision(output, target),
-            rc=self.recall(output, target),
-        )
+    def update(self, output: torch.Tensor, target: torch.Tensor) -> None:
+        self.collection.update(output, target)
+
+    def compute(self) -> FitStatistics:
+        values = self.collection.compute()
+        return FitStatistics(**{k: float(v) for k, v in values.items()})
+
+    def reset(self) -> None:
+        self.collection.reset()
+
+    def __call__(self, output: torch.Tensor, target: torch.Tensor) -> FitStatistics:
+        """Compute metrics for a single batch (does not accumulate)."""
+        self.reset()
+        self.update(output, target)
+        stats = self.compute()
+        self.reset()
+        return stats
 
 
 class EpochMetrics(BaseModel):
@@ -112,104 +107,67 @@ class EpochMetrics(BaseModel):
 
 
 class Metrics:
-    metrics: List[EpochMetrics] = []
+    """History of per-epoch metrics."""
 
-    def collect(self) -> Dict[str, Union[List[int], List[float]]]:
+    def __init__(self) -> None:
+        self.metrics: list[EpochMetrics] = []
+
+    def append(self, epoch: int, metrics: dict[str, float]) -> None:
+        self.metrics.append(EpochMetrics(epoch=epoch, **metrics))
+
+    def collect(self) -> dict[str, list[float]]:
+        """Column-oriented view: `{"epoch": [...], "loss": [...], ...}`."""
         return {
-            "epoch": self.epoch(),
-            "loss": self.loss(),
-            "val_loss": self.val_loss(),
-            "val_acc": self.val_acc(),
-            "val_f1": self.val_f1(),
-            "val_pr": self.val_pr(),
-            "val_rc": self.val_rc(),
+            field: [getattr(m, field) for m in self.metrics]
+            for field in EpochMetrics.model_fields
         }
 
-    def epoch(self) -> List[int]:
-        return [m.epoch for m in self.metrics]
+    def save(self, output_dir: str | Path, version: str = "") -> Path:
+        suffix = f"-{version}" if version else ""
+        path = Path(output_dir) / f"metrics{suffix}.json"
+        path.write_text(json.dumps(self.collect(), indent=2))
+        return path
 
-    def loss(self) -> List[float]:
-        return [m.loss for m in self.metrics]
-
-    def val_loss(self) -> List[float]:
-        return [m.val_loss for m in self.metrics]
-
-    def val_acc(self) -> List[float]:
-        return [m.val_acc for m in self.metrics]
-
-    def val_f1(self) -> List[float]:
-        return [m.val_f1 for m in self.metrics]
-
-    def val_pr(self) -> List[float]:
-        return [m.val_pr for m in self.metrics]
-
-    def val_rc(self) -> List[float]:
-        return [m.val_rc for m in self.metrics]
-
-    def append(self, epoch: int, metrics: Dict[str, Union[int, float]]) -> None:
-        epoch_metrics = EpochMetrics(epoch=epoch, **metrics)
-        self.metrics.append(epoch_metrics)
-
-    def save(
-        self,
-        output_dir: str,
-        version: str = "",
-    ) -> str:
-        version = "" if version == "" else f"-{version}"
-        save_as = f"{output_dir}/metrics{version}.json"
-        data = self.collect()
-        with open(save_as, "w") as f:
-            json.dump(data, f, indent=2)
-        return save_as
+    def __len__(self) -> int:
+        return len(self.metrics)
 
 
 class BestMetric:
-    def __init__(self, metric: str = "val_loss"):
+    """
+    Tracks the best value of a metric, keeps a snapshot of the corresponding
+    model weights, and counts epochs without improvement for early stopping.
+    """
+
+    def __init__(self, metric: str = "val_loss") -> None:
         self.metric = metric
-        self.mode = self.get_mode(metric)
+        self.mode = "min" if metric in LOWER_IS_BETTER else "max"
+        self.alt_metric = "val_acc" if metric in LOWER_IS_BETTER else "val_loss"
         self.epoch = 0
-        self.value = self.get_value(metric)
-        self.alt_metric = self.get_alt_metric(metric)
-        self.alt_value = self.get_value(self.alt_metric)
-        self.state_dict = {}
+        self.value = float("inf") if self.mode == "min" else -float("inf")
+        self.alt_value = float("nan")
+        self.state_dict: dict[str, torch.Tensor] = {}
         self.early_stop_counter = 0
         self.trn_loss = float("inf")
 
-    def get_mode(self, metric: str) -> str:
-        if metric in ["loss", "val_loss"]:
-            return "min"
-        return "max"
-
-    def get_value(self, metric: str) -> float:
-        if self.mode == "max":
-            return -float("inf")
-        return float("inf")
-
-    def get_alt_metric(self, metric: str) -> str:
-        if metric in ["loss", "val_loss"]:
-            return "val_acc"
-        return "val_loss"
-
-    def get_alt_value(self, metric: str) -> float:
-        if self.mode == "max":
-            return -float("inf")
-        return float("inf")
-
     def is_improvement(self, new: float) -> bool:
-        if self.mode == "max":
-            return new > self.value
-        return new < self.value
+        return new < self.value if self.mode == "min" else new > self.value
 
-    def __call__(self, epoch: int, metrics: Dict[str, float], model: Model):
-        new_value = metrics[self.metric]
-        new_alt_value = metrics[self.alt_metric]
-        if self.is_improvement(new_value):
-            self.epoch = epoch
-            self.value = new_value
-            self.alt_value = new_alt_value
-            self.epoch = epoch
-            self.state_dict = model.state_dict()
-            self.early_stop_counter = 0
-            self.trn_loss = metrics["loss"]
-        else:
+    def __call__(
+        self, epoch: int, metrics: dict[str, float], model: torch.nn.Module
+    ) -> bool:
+        """Record an epoch's metrics. Returns True if it was an improvement."""
+        new_value = float(metrics[self.metric])
+        if not self.is_improvement(new_value):
             self.early_stop_counter += 1
+            return False
+        self.epoch = epoch
+        self.value = new_value
+        self.alt_value = float(metrics[self.alt_metric])
+        # `state_dict()` returns references to live parameters; snapshot them
+        # (on cpu) so later optimizer steps don't overwrite the best weights.
+        self.state_dict = {
+            k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()
+        }
+        self.early_stop_counter = 0
+        self.trn_loss = float(metrics["loss"])
+        return True

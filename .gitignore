@@ -153,7 +153,9 @@ dmypy.json
 cython_debug/
 
 # other
-.python-version
+.ruff_cache/
+/models
+training/models/
 .markdownlint.json
 /data
 aimlabs.code-workspace

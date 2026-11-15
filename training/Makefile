@@ -1,16 +1,12 @@
-BIN = .venv/Scripts
-PIP = $(BIN)/pip.exe
-PYTHON = $(BIN)/python.exe
-PYTEST = $(BIN)/pytest
+# Convenience wrapper; see the Makefile at the repository root.
+.PHONY: develop test train
 
-.PHONY: develop
 develop:
-	python -m venv .venv
-	$(PIP) install \
-		-e ../model/. \
-		-r requirements/dev.txt
-		# -r requirements/training.txt
+	$(MAKE) -C .. develop
 
-.PHONY: test
 test:
-	$(PYTEST) -s --cov=src .
+	uv run pytest tests
+
+# e.g. make train ARGS="--input-dir ~/data/imdb --save"
+train:
+	uv run python scripts/train.py $(ARGS)

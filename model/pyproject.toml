@@ -1,23 +1,31 @@
-[tool.poetry]
+[project]
 name = "aimlabs"
-version = "0.1.0"
-description = ""
-authors = ["kearneymw <mike.wayne.kearney@gmail.com>"]
+version = "0.2.0"
+description = "Fine-tune and serve transformer-based text classification models."
 readme = "README.md"
-packages = [{include = "aimlabs", from = "src"}]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Michael W. Kearney" }]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.5",
+    "structlog>=23.1",
+    "torch>=2.1",
+    "transformers>=4.36",
+]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-pydantic = "^2.2.1"
-torch = "^2.0.1"
-transformers = "^4.31.0"
-structlog = "^23.1.0"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.4.0"
-pytest-cov = "^4.1.0"
+[project.urls]
+Repository = "https://github.com/mkearney/aimlabs"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aimlabs"]

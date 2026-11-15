@@ -1,127 +1,91 @@
+from __future__ import annotations
+
 import json
 from argparse import Namespace
-from typing import Dict, Generator, List, Union
+from collections.abc import Iterator
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
 
 import torch
+
 from aimlabs.hyperparameters import HyperParameters
 
 
-def batch_messages(
-    messages: List[str], batch_size: int
-) -> Generator[List[str], None, None]:
-    """
-    Splits list of messages into batches of given size
-
-    ### Args:
-        - `messages`: A list of messages to split
-        - `batch_size`: Size of each batch
-
-    ### Returns:
-        - Generator of lists of messages each is the size of batch_size
-    """
+def batch_messages(messages: list[str], batch_size: int) -> Iterator[list[str]]:
+    """Split a list of messages into batches of `batch_size`."""
     for i in range(0, len(messages), batch_size):
-        yield messages[i : i + batch_size]  # noqa
+        yield messages[i : i + batch_size]
 
 
-def save_hypers(
-    params: Dict[str, Union[str, int, float]],
-    output_dir: str,
-    version: str,
-) -> str:
-    """
-    Save hyperparameters to json file
-
-    ### Args:
-        - `params` A dictionary of parameters that will be saved
-        - `output_dir` The directory to save the model to
-        - `version` The version of the model to save
-
-    ### Returns:
-        - The name of the file
-    """
-    version = "" if version == "" else f"-{version}"
-    save_as = f"{output_dir}/hyperparameters{version}.json"
-    with open(save_as, "w") as f:
-        json.dump(params, f, indent=2)
-    return save_as
+def save_hypers(params: dict[str, Any], output_dir: str | Path, version: str) -> Path:
+    """Save hyperparameters to `<output_dir>/hyperparameters[-<version>].json`."""
+    suffix = f"-{version}" if version else ""
+    path = Path(output_dir) / f"hyperparameters{suffix}.json"
+    path.write_text(json.dumps(params, indent=2))
+    return path
 
 
 def get_hyperparameters_from_args(args: Namespace) -> HyperParameters:
-    """
-    Get hyperparameters from command line arguments
-
-    ### Args:
-        - `args` Command line arguments as returned by argparse
-
-    ### Returns:
-        - An instance of HyperParameters
-    """
-    d = args.__dict__
+    """Build HyperParameters from parsed CLI args, ignoring unset (None) values."""
     kwargs = {
         k: v
-        for k, v in d.items()
+        for k, v in vars(args).items()
         if k in HyperParameters.model_fields and v is not None
     }
     return HyperParameters(**kwargs)
 
 
-def model_size(model: torch.nn.Module) -> Dict[str, str]:
-    """
-    Returns information about the size of a model
-
-    ### Args:
-        - `model` nn.Module of interest
-
-    ### Returns:
-        - dictionary with "parameters" (the number of parameters) and
-            "memory" (the amount of memory used in MB)
-    """
-    # total number of parameters
-    num_params = sum(param.numel() for param in model.parameters())
-    num_buffers = sum(buffer.numel() for buffer in model.buffers())
-    parameters = num_params + num_buffers
-
-    # number of trainable parameters
-    trainables = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    # total size of parameters and buffers
-    param_size = sum(
-        param.nelement() * param.element_size() for param in model.parameters()
-    )
-    buffer_size = sum(
-        buffer.nelement() * buffer.element_size() for buffer in model.buffers()
-    )
-    memory = (param_size + buffer_size) / 1024**2
-    # format for printing/logging and return
+def model_size(model: torch.nn.Module) -> dict[str, str]:
+    """Return the number of (trainable) parameters and memory footprint."""
+    tensors = [*model.parameters(), *model.buffers()]
+    parameters = sum(t.numel() for t in tensors)
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    memory = sum(t.nelement() * t.element_size() for t in tensors) / 1024**2
     return {
         "parameters": f"{parameters:,}",
-        "trainable": f"{trainables:,}",
+        "trainable": f"{trainable:,}",
         "memory": f"{memory:,.1f}MB",
     }
 
 
-def log_metrics(epoch: int, epoch_lr: float, metrics: Dict[str, float], logger) -> None:
-    epoch_metrics_logging = {
-        "_trn": metrics["loss"],
-        "_val": metrics["val_loss"],
-        "acc": metrics["val_acc"],
-        "f1": metrics["val_f1"],
-        "pr": metrics["val_pr"],
-        "rc": metrics["val_rc"],
-    }
-    epoch_metrics_logging = {k: f"{v:.4f}" for k, v in epoch_metrics_logging.items()}
-    epp = f"{epoch:2d}"
-    epp = f"{epp:^6}".replace(" ", "_")
-    logger.info(f"{epp}", __lr=f"{epoch_lr:.5f}", **epoch_metrics_logging)
+def format_duration(duration: timedelta) -> dict[str, str]:
+    seconds = duration.total_seconds()
+    if seconds > 3600:
+        return {"hours": f"{seconds / 3600:,.2f}"}
+    if seconds > 120:
+        return {"minutes": f"{seconds / 60:,.2f}"}
+    return {"seconds": f"{seconds:,.2f}"}
 
 
-def log_test_metrics(metrics: Dict[str, float], logger) -> None:
-    epoch_metrics_logging = {
-        "_tst": metrics["val_loss"],
-        "acc": metrics["val_acc"],
-        "f1": metrics["val_f1"],
-        "pr": metrics["val_pr"],
-        "rc": metrics["val_rc"],
-    }
-    epoch_metrics_logging = {k: f"{v:.4f}" for k, v in epoch_metrics_logging.items()}
-    logger.info("_test_", **epoch_metrics_logging)
+def _fmt(metrics: dict[str, float], keys: dict[str, str]) -> dict[str, str]:
+    return {alias: f"{metrics[key]:.4f}" for alias, key in keys.items()}
+
+
+def log_metrics(epoch: int, epoch_lr: float, metrics: dict[str, float], logger) -> None:
+    fields = _fmt(
+        metrics,
+        {
+            "_trn": "loss",
+            "_val": "val_loss",
+            "acc": "val_acc",
+            "f1": "val_f1",
+            "pr": "val_pr",
+            "rc": "val_rc",
+        },
+    )
+    logger.info(f"{epoch:^6d}".replace(" ", "_"), __lr=f"{epoch_lr:.5f}", **fields)
+
+
+def log_test_metrics(metrics: dict[str, float], logger) -> None:
+    fields = _fmt(
+        metrics,
+        {
+            "_tst": "val_loss",
+            "acc": "val_acc",
+            "f1": "val_f1",
+            "pr": "val_pr",
+            "rc": "val_rc",
+        },
+    )
+    logger.info("_test_", **fields)

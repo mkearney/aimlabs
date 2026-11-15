@@ -1,200 +1,209 @@
-from collections import defaultdict
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
-from aimlabs.hyperparameters import HyperParameters
-from aimlabs.utils import get_logger
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
     AutoTokenizer,
-    logging,
+    PretrainedConfig,
 )
+from transformers.utils import logging as hf_logging
 
-# create dict containing name of intermediate or hidden output dimension
-# for each model based on the default configuration file
-model_dimensions_name: Dict[str, str] = defaultdict(lambda: "hidden_size")
-model_dimensions_name.update(
-    {
-        "albert-base-v2": "intermediate_size",
-        "bert-base-cased": "intermediate_size",
-        "bert-base-uncased": "intermediate_size",
-        "distilbert-base-cased": "dim",
-        "distilbert-base-uncased": "dim",
-        "distilroberta-base": "intermediate_size",
-        "roberta-base": "intermediate_size",
-    }
-)
+from aimlabs.hyperparameters import HyperParameters
+from aimlabs.utils import get_logger
 
+# Width of the pretrained head's output when a trainable hidden layer is stacked
+# on top. These overrides are kept for checkpoint compatibility; any model not
+# listed falls back to the first matching attribute in `_DIMENSION_FIELDS`.
+_MODEL_DIMENSION_FIELD: dict[str, str] = {
+    "albert-base-v2": "intermediate_size",
+    "bert-base-cased": "intermediate_size",
+    "bert-base-uncased": "intermediate_size",
+    "distilbert-base-cased": "dim",
+    "distilbert-base-uncased": "dim",
+    "distilroberta-base": "intermediate_size",
+    "roberta-base": "intermediate_size",
+}
+_DIMENSION_FIELDS = ("hidden_size", "dim", "d_model", "n_embd")
 
-model_dropout_name: Dict[str, str] = defaultdict(lambda: "hidden_dropout_prob")
-model_dropout_name.update(
-    {
-        "albert-base-v2": "classifier_dropout_prob",
-        "bert-base-cased": "classifier_dropout",
-        "bert-base-uncased": "classifier_dropout",
-        "distilbert-base-cased": "seq_classif_dropout",
-        "distilbert-base-uncased": "seq_classif_dropout",
-        "distilroberta-base": "classifier_dropout",
-        "roberta-base": "classifier_dropout",
-    }
+# Config attributes controlling classifier dropout, in order of preference.
+_DROPOUT_FIELDS = (
+    "classifier_dropout",
+    "classifier_dropout_prob",
+    "seq_classif_dropout",
+    "hidden_dropout_prob",
 )
 
 
-def get_dimensions(config: AutoConfig) -> int:
-    field = model_dimensions_name[config.__dict__["_name_or_path"]]
-    if field == "hidden_size" and "intermediate_size" in model_dimensions_name.__dict__:
-        field = "intermediate_size"
-    return config.__dict__[field]
+def get_dimensions(config: PretrainedConfig) -> int:
+    """Return the output width used for the pretrained classification head."""
+    field = _MODEL_DIMENSION_FIELD.get(config.name_or_path or "")
+    if field is not None and getattr(config, field, None):
+        return int(getattr(config, field))
+    for field in _DIMENSION_FIELDS:
+        if value := getattr(config, field, None):
+            return int(value)
+    raise ValueError(
+        f"Could not infer hidden dimension for {config.name_or_path!r}; "
+        f"none of {_DIMENSION_FIELDS} are set in its config."
+    )
 
 
-def get_dropout_name(config: AutoConfig) -> str:
-    return model_dropout_name[config.__dict__["_name_or_path"]]
+def get_dropout_name(config: PretrainedConfig) -> str:
+    """Return the name of the config attribute controlling classifier dropout."""
+    for field in _DROPOUT_FIELDS:
+        if hasattr(config, field):
+            return field
+    return "hidden_dropout_prob"
 
 
 class Model(nn.Module):
     """
-    Initialize a pretrained torch module model
+    A pretrained Hugging Face sequence classifier with an optional trainable
+    hidden layer stacked on top.
 
     ### Args
-        - `hyperparameters` HyperParameters used to initialize the model.
+        - `hyperparameters`: HyperParameters used to initialize the model.
+        - `label2id`: mapping of label names to class indices. Defaults to
+          `{"0": 0, "1": 1, ...}`.
     """
 
     def __init__(
         self,
         hyperparameters: HyperParameters,
-        label2id: Optional[Dict[str, int]] = None,
-    ):
-        super(Model, self).__init__()
-        # model settings
+        label2id: dict[str, int] | None = None,
+    ) -> None:
+        super().__init__()
         self.hyperparameters = hyperparameters
-        self._hp = self.hyperparameters
+        self._hp = hyperparameters
         self.label2id = label2id or {str(i): i for i in range(self._hp.num_classes)}
+        if len(self.label2id) != self._hp.num_classes:
+            raise ValueError(
+                f"label2id has {len(self.label2id)} labels but num_classes is "
+                f"{self._hp.num_classes}"
+            )
         self.id2label = {v: k for k, v in self.label2id.items()}
         self.version = datetime.now().strftime(f"{self._hp.version}.%Y%m%d%H%M%S")
         self.logger = get_logger(self.__class__.__name__)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.first_step = True
-        logging.set_verbosity_error()
+        self._first_step = True
 
-        # model architecture
-        config = AutoConfig.from_pretrained(self._hp.model)
-        if self._hp.num_hidden > 0:
-            self.inner_dims = get_dimensions(config)
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                self._hp.model,
-                num_labels=self.inner_dims,
-                max_length=self._hp.max_len,
-                output_hidden_states=False,
-            )
-            self.outer_layer = nn.Sequential(
-                nn.Dropout(self._hp.dropout),
-                nn.Linear(self.inner_dims, self._hp.num_hidden),
-                nn.BatchNorm1d(self._hp.num_hidden),
-                nn.Linear(self._hp.num_hidden, self._hp.num_classes),
-            )
-        else:
-            self.inner_dims = 0
-            dropout_arg = {get_dropout_name(config): self._hp.dropout}
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                self._hp.model,
-                num_labels=self._hp.num_classes,
-                max_length=self._hp.max_len,
-                output_hidden_states=False,
-                **dropout_arg,
-            )
-            self.outer_layer = nn.Identity()
+        verbosity = hf_logging.get_verbosity()
+        hf_logging.set_verbosity_error()
+        try:
+            config = AutoConfig.from_pretrained(self._hp.model)
+            if self._hp.num_hidden > 0:
+                self.inner_dims = get_dimensions(config)
+                self.model = AutoModelForSequenceClassification.from_pretrained(
+                    self._hp.model,
+                    num_labels=self.inner_dims,
+                    # the classification head is always (re)initialized for our
+                    # label count, even if the checkpoint ships with one
+                    ignore_mismatched_sizes=True,
+                )
+                self.outer_layer: nn.Module = nn.Sequential(
+                    nn.Dropout(self._hp.dropout),
+                    nn.Linear(self.inner_dims, self._hp.num_hidden),
+                    nn.BatchNorm1d(self._hp.num_hidden),
+                    nn.Linear(self._hp.num_hidden, self._hp.num_classes),
+                )
+            else:
+                self.inner_dims = 0
+                self.model = AutoModelForSequenceClassification.from_pretrained(
+                    self._hp.model,
+                    num_labels=self._hp.num_classes,
+                    id2label=self.id2label,
+                    label2id=self.label2id,
+                    ignore_mismatched_sizes=True,
+                    **{get_dropout_name(config): self._hp.dropout},
+                )
+                self.outer_layer = nn.Identity()
+            self.tokenizer = AutoTokenizer.from_pretrained(self._hp.model)
+        finally:
+            hf_logging.set_verbosity(verbosity)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self._hp.model, **self.model.config.__dict__
-        )
-        logging.set_verbosity_warning()
         self.freeze()
         self.init_weights()
 
-    def init_weights(self):
-        if self.inner_dims > 0:
-            for module in self.outer_layer:  # type: ignore
-                if isinstance(module, nn.Linear):
-                    for param in module.parameters():
-                        if param.dim() > 1:
-                            param.data.normal_(mean=0.0, std=self._hp.init_std)
-                        else:
-                            param.data.zero_()
+    @property
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
 
-    def freeze(self):
-        """Freeze base model parameters"""
-        if self._hp.freeze:
-            for param in self.model.base_model.parameters():  # type: ignore
-                param.requires_grad = False
+    def init_weights(self) -> None:
+        """Initialize the outer (non-pretrained) linear layers."""
+        for module in self.outer_layer.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, mean=0.0, std=self._hp.init_std)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def freeze(self) -> None:
+        """Freeze pretrained parameters according to the hyperparameters."""
+        params = None
         if self._hp.hard_freeze:
-            for param in self.model.parameters():  # type: ignore
-                param.requires_grad = False
+            params = self.model.parameters()
+        elif self._hp.freeze:
+            params = self.model.base_model.parameters()
+        for param in params or []:
+            param.requires_grad = False
 
-    def preprocess(self, messages: List[str]) -> Dict[str, torch.Tensor]:
+    def preprocess(self, messages: list[str]) -> dict[str, torch.Tensor]:
         """
-        Preprocess messages
+        Tokenize a batch of messages.
 
         ### Args
-            - `messages` A list (batch) of messages to be preprocessed.
+            - `messages`: a list (batch) of messages to be preprocessed.
 
         ### Returns
-            - A dictionary of tokenization results.
+            - A dictionary with `input_ids` and `attention_mask` tensors.
         """
-        return self.tokenizer(
+        encoded = self.tokenizer(
             messages,
             return_tensors="pt",
             truncation=True,
             max_length=self._hp.max_len,
             add_special_tokens=True,
             padding="max_length",
-        )  # type: ignore
+        )
+        return {
+            "input_ids": encoded["input_ids"],
+            "attention_mask": encoded["attention_mask"],
+        }
 
-    def forward_raw(self, messages: List[str]) -> torch.Tensor:
-        """
-        Forward pass of neural network
-
-        ### Args
-            - `messages` A list (batch) of messages to be processed
-
-        ### Returns
-            - Tensor of shape (batch_size, num_classes) containing output logits
-        """
-        inputs = self.preprocess(messages)
+    def forward_raw(self, messages: list[str]) -> torch.Tensor:
+        """Tokenize `messages` and return logits of shape (batch, num_classes)."""
+        inputs = {k: v.to(self.device) for k, v in self.preprocess(messages).items()}
         return self.forward(**inputs)
 
     def forward(
         self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
+        labels: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        Forward pass of neural network
+        Forward pass.
 
         ### Args
-            - `input_ids` Indices
-            - `attention_mask` Masks
-            - `labels` Labels, optional
+            - `input_ids`: token indices
+            - `attention_mask`: attention masks
+            - `labels`: ignored; accepted so dataset batches can be unpacked
 
         ### Returns
-            - Tensor of shape (batch_size, num_classes) containing output logits
+            - Tensor of shape (batch_size, num_classes) containing logits
         """
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
         return self.outer_layer(output.logits)
 
-    def train_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        output = self.model(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-        )
-        logits = self.outer_layer(output.logits)
-        if self.first_step:
-            self.first_step = False
-            self.logger.info(
+    def train_step(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Compute the training loss for a single batch."""
+        logits = self.forward(batch["input_ids"], batch["attention_mask"])
+        if self._first_step:
+            self._first_step = False
+            self.logger.debug(
                 "shapes", _output=list(logits.shape), labels=list(batch["labels"].shape)
             )
-        loss = self.loss_fn(logits, batch["labels"])
-        return loss
+        return self.loss_fn(logits, batch["labels"])
